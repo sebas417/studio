@@ -64,6 +64,8 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
         },
   });
 
+  const { formState: { dirtyFields } } = form;
+
   React.useEffect(() => {
     if (initialData) {
       form.reset({
@@ -81,25 +83,46 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
   }, [initialData, form.reset, form]);
 
   const handleAIDataPopulation = (extracted: ExtractDataOutput, documentType: "Receipt" | "Bill") => {
-    // Only populate if the field is currently empty or if AI provides a value, to avoid overwriting manual entries unless explicitly re-triggered
-    if (extracted.date && !form.getValues("date")) form.setValue("date", new Date(extracted.date), { shouldValidate: true });
-    if (extracted.provider && !form.getValues("provider")) form.setValue("provider", extracted.provider, { shouldValidate: true });
-    if (extracted.patient && !form.getValues("patient")) form.setValue("patient", extracted.patient, { shouldValidate: true });
-    if (extracted.cost && !form.getValues("cost")) form.setValue("cost", extracted.cost, { shouldValidate: true });
+    if (extracted.date && !dirtyFields.date) {
+      form.setValue("date", new Date(extracted.date), { shouldValidate: true });
+    }
+    if (extracted.provider && !dirtyFields.provider) {
+      form.setValue("provider", extracted.provider, { shouldValidate: true });
+    }
+    if (extracted.patient && !dirtyFields.patient) {
+      form.setValue("patient", extracted.patient, { shouldValidate: true });
+    }
+    // Only set cost if AI extracted a positive value and the cost field hasn't been manually edited
+    if (extracted.cost && extracted.cost > 0 && !dirtyFields.cost) {
+      form.setValue("cost", extracted.cost, { shouldValidate: true });
+    }
     toast({ title: `Data Extracted from ${documentType}`, description: `Fields populated from ${documentType.toLowerCase()}. Please review.` });
   };
 
-  const processImageForAI = async (dataUri: string, docType: "receipt" | "bill") => {
+  const processImageForAI = async (dataUri: string, docType: "receipt" | "bill", fileName: string) => {
     const currentSetter = docType === "receipt" ? setIsExtractingReceipt : setIsExtractingBill;
     const currentFileNameSetter = docType === "receipt" ? setUploadedReceiptFileName : setUploadedBillFileName;
     
     currentSetter(true);
-    currentFileNameSetter(`Uploaded ${docType}.png`); 
+    currentFileNameSetter(fileName); 
 
     if (docType === "receipt") {
       form.setValue("receiptImageUri", dataUri);
     } else {
       form.setValue("billImageUri", dataUri);
+    }
+
+    const currentFormValues = form.getValues();
+    const isScanWorthSkipping = currentFormValues.provider !== "" && currentFormValues.patient !== "" && currentFormValues.cost > 0;
+
+    if (isScanWorthSkipping) {
+      toast({
+        title: "Fields Already Populated",
+        description: "AI extraction skipped. To re-extract, please clear the relevant fields first.",
+        duration: 5000,
+      });
+      currentSetter(false);
+      return;
     }
     
     try {
@@ -122,11 +145,9 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
       const reader = new FileReader();
       reader.onloadend = async () => {
         const dataUri = reader.result as string;
-        await processImageForAI(dataUri, docType);
+        await processImageForAI(dataUri, docType, file.name);
       };
       reader.readAsDataURL(file);
-      if (docType === "receipt") setUploadedReceiptFileName(file.name);
-      else setUploadedBillFileName(file.name);
     }
   };
     
@@ -265,3 +286,4 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     </>
   );
 }
+
