@@ -16,7 +16,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import type { Expense } from "@/lib/types";
 import { extractData, type ExtractDataOutput } from "@/ai/flows/extract-data-from-receipt";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, UploadCloud, Wand2, CirclePlay } from "lucide-react";
+import { Loader2, UploadCloud, Wand2 } from "lucide-react";
 
 export const expenseFormSchema = z.object({
   date: z.date({ required_error: "Date is required." }),
@@ -81,10 +81,11 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
   }, [initialData, form.reset, form]);
 
   const handleAIDataPopulation = (extracted: ExtractDataOutput, documentType: "Receipt" | "Bill") => {
-    if (extracted.date) form.setValue("date", new Date(extracted.date), { shouldValidate: true });
-    if (extracted.provider) form.setValue("provider", extracted.provider, { shouldValidate: true });
-    if (extracted.patient) form.setValue("patient", extracted.patient, { shouldValidate: true });
-    if (extracted.cost) form.setValue("cost", extracted.cost, { shouldValidate: true });
+    // Only populate if the field is currently empty or if AI provides a value, to avoid overwriting manual entries unless explicitly re-triggered
+    if (extracted.date && !form.getValues("date")) form.setValue("date", new Date(extracted.date), { shouldValidate: true });
+    if (extracted.provider && !form.getValues("provider")) form.setValue("provider", extracted.provider, { shouldValidate: true });
+    if (extracted.patient && !form.getValues("patient")) form.setValue("patient", extracted.patient, { shouldValidate: true });
+    if (extracted.cost && !form.getValues("cost")) form.setValue("cost", extracted.cost, { shouldValidate: true });
     toast({ title: `Data Extracted from ${documentType}`, description: `Fields populated from ${documentType.toLowerCase()}. Please review.` });
   };
 
@@ -93,7 +94,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     const currentFileNameSetter = docType === "receipt" ? setUploadedReceiptFileName : setUploadedBillFileName;
     
     currentSetter(true);
-    currentFileNameSetter(`Uploaded ${docType}.png`); // Simplified filename
+    currentFileNameSetter(`Uploaded ${docType}.png`); 
 
     if (docType === "receipt") {
       form.setValue("receiptImageUri", dataUri);
@@ -128,24 +129,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
       else setUploadedBillFileName(file.name);
     }
   };
-  
-  const handleGoogleDriveUpload = async (docType: "receipt" | "bill") => {
-    toast({
-      title: "Google Drive Upload (Placeholder)",
-      description: `This feature is not fully implemented. Would upload ${docType} from Google Drive.`,
-    });
-    // Placeholder for Google Drive Picker API integration
-    // 1. Load Google Picker API script
-    // 2. Initialize OAuth 2.0 client
-    // 3. Create and display the Picker
-    // 4. Handle the selected file(s) (convert to data URI for consistency if image)
-    //    For example, if an image is picked:
-    //    const file = pickerData.docs[0];
-    //    // Fetch file content, convert to data URI, then:
-    //    // processImageForAI(dataUri, docType);
-    console.log(`Placeholder: Upload ${docType} from Google Drive`);
-  };
-  
+    
   const isProcessing = isExtractingReceipt || isExtractingBill;
 
   const onFormSubmit = (data: ExpenseFormValues) => {
@@ -167,16 +151,12 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
               {/* Receipt Section */}
               <div className="space-y-2 p-4 border rounded-md shadow-sm">
                 <Label htmlFor="receiptUploadTrigger" className="font-semibold">Receipt Document</Label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2">
                   <Button type="button" id="receiptUploadTrigger" onClick={() => (document.getElementById('receiptUpload') as HTMLInputElement)?.click()} variant="outline" disabled={isProcessing}>
                     {isExtractingReceipt ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
                     Upload Receipt
                   </Button>
                   <Input id="receiptUpload" type="file" accept="image/*,.pdf" onChange={(e) => handleFileUpload(e, "receipt")} className="hidden" disabled={isProcessing}/>
-                  <Button type="button" onClick={() => handleGoogleDriveUpload("receipt")} variant="outline" disabled={isProcessing}>
-                    <CirclePlay className="h-4 w-4 mr-2" /> {/* Placeholder for Google Drive icon */}
-                    From Drive
-                  </Button>
                 </div>
                 {uploadedReceiptFileName && !isExtractingReceipt && <p className="text-sm text-muted-foreground mt-1">File: {uploadedReceiptFileName}</p>}
                 {form.getValues("receiptImageUri") && !uploadedReceiptFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Existing receipt present.</p>}
@@ -186,16 +166,12 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
               {/* Bill Section */}
               <div className="space-y-2 p-4 border rounded-md shadow-sm">
                 <Label htmlFor="billUploadTrigger" className="font-semibold">Bill Document</Label>
-                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                 <div className="grid grid-cols-1 gap-2">
                   <Button type="button" id="billUploadTrigger" onClick={() => (document.getElementById('billUpload') as HTMLInputElement)?.click()} variant="outline" disabled={isProcessing}>
                     {isExtractingBill ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
                     Upload Bill
                   </Button>
                    <Input id="billUpload" type="file" accept="image/*,.pdf" onChange={(e) => handleFileUpload(e, "bill")} className="hidden" disabled={isProcessing}/>
-                  <Button type="button" onClick={() => handleGoogleDriveUpload("bill")} variant="outline" disabled={isProcessing}>
-                    <CirclePlay className="h-4 w-4 mr-2" /> {/* Placeholder for Google Drive icon */}
-                    From Drive
-                  </Button>
                 </div>
                 {uploadedBillFileName && !isExtractingBill && <p className="text-sm text-muted-foreground mt-1">File: {uploadedBillFileName}</p>}
                 {form.getValues("billImageUri") && !uploadedBillFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Existing bill present.</p>}
