@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -15,7 +16,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import type { Expense } from "@/lib/types";
 import { extractData, type ExtractDataOutput } from "@/ai/flows/extract-data-from-receipt";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, UploadCloud, Wand2 } from "lucide-react";
+import { Loader2, UploadCloud, Wand2, CirclePlay /* Replaced GoogleDrive with a generic play icon for now */ } from "lucide-react";
 
 export const expenseFormSchema = z.object({
   date: z.date({ required_error: "Date is required." }),
@@ -83,6 +84,41 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     }
   };
 
+  // Placeholder for Google Drive Picker integration
+  const handleGoogleDriveUpload = () => {
+    // In a real application, you would integrate with the Google Picker API here.
+    // This would involve:
+    // 1. Loading the Google API client library (gapi) and the Picker API.
+    //    Often done by adding <script src="https://apis.google.com/js/api.js"></script> to your HTML.
+    // 2. Setting up OAuth 2.0 credentials in Google Cloud Console.
+    // 3. Initializing the gapi client and Picker API, typically in a useEffect hook.
+    //    gapi.load('picker', initializePicker);
+    // 4. Authenticating the user with Google (gapi.auth2.init, gapi.auth2.getAuthInstance().signIn()).
+    // 5. Building and displaying the Google Picker:
+    //    const picker = new google.picker.PickerBuilder()
+    //      .addView(google.picker.ViewId.DOCS_IMAGES) // or other views
+    //      .setOAuthToken(accessToken) // User's Google OAuth token
+    //      .setDeveloperKey(YOUR_API_KEY) // Your Google Developer API Key
+    //      .setCallback(pickerCallback) // Function to handle selected files
+    //      .build();
+    //    picker.setVisible(true);
+    // 6. In pickerCallback(data):
+    //    if (data[google.picker.Response.ACTION] == google.picker.Action.PICKED) {
+    //      const file = data[google.picker.Response.DOCUMENTS][0];
+    //      const fileId = file[google.picker.Document.ID];
+    //      // Then use fileId with Google Drive API (gapi.client.drive.files.get) to get file content.
+    //      // Convert to Data URI and proceed with AI extraction.
+    //    }
+    // This is a simplified overview. Refer to Google Picker API documentation for details.
+
+    toast({
+      title: "Google Drive Upload",
+      description: "Google Drive integration is a placeholder and not yet fully implemented. See code comments for integration steps.",
+      variant: "default",
+      duration: 9000, // Longer duration for this informational toast
+    });
+  };
+
   const onFormSubmit = (data: ExpenseFormValues) => {
     onSubmit(data);
   };
@@ -99,12 +135,16 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
         <form onSubmit={form.handleSubmit(onFormSubmit)}>
           <CardContent className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="receiptUpload">Upload Receipt (Optional)</Label>
-              <div className="flex items-center gap-2">
+              <Label htmlFor="receiptUpload">Upload Receipt</Label>
+              <div className="flex flex-col sm:flex-row items-center gap-2">
                 <Input id="receiptUpload" type="file" accept="image/*" onChange={handleFileUpload} className="flex-grow" disabled={isExtracting}/>
-                <Button type="button" onClick={() => (document.getElementById('receiptUpload') as HTMLInputElement)?.click()} variant="outline" disabled={isExtracting}>
-                  {isExtracting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
-                  Upload
+                <Button type="button" onClick={() => (document.getElementById('receiptUpload') as HTMLInputElement)?.click()} variant="outline" className="w-full sm:w-auto" disabled={isExtracting}>
+                  {isExtracting && !uploadedFileName ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
+                  Upload from Device
+                </Button>
+                <Button type="button" onClick={handleGoogleDriveUpload} variant="outline" className="w-full sm:w-auto" disabled={isExtracting}>
+                  <CirclePlay className="h-4 w-4 mr-2" /> {/* Using CirclePlay icon as GoogleDrive is not in lucide */}
+                  Upload from Drive
                 </Button>
               </div>
               {uploadedFileName && !isExtracting && <p className="text-sm text-muted-foreground">Uploaded: {uploadedFileName}</p>}
@@ -196,3 +236,6 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     </Card>
   );
 }
+
+
+    
