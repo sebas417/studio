@@ -35,13 +35,17 @@ export function useExpenses() {
     }
   }, [expenses, isLoading]);
 
-  const addExpense = useCallback((data: Omit<Expense, 'id' | 'isReimbursed' | 'date'> & { date: Date; receiptImageUri?: string }) => {
+  const addExpense = useCallback((data: Omit<Expense, 'id' | 'isReimbursed' | 'date'> & { date: Date; receiptImageUri?: string; billImageUri?: string }) => {
     setExpenses((prevExpenses) => {
       const newExpense: Expense = {
-        ...data,
         id: uuidv4(),
         date: data.date.toISOString().split('T')[0], // Store date as YYYY-MM-DD string
-        isReimbursed: false, // Default to not reimbursed
+        provider: data.provider,
+        patient: data.patient,
+        cost: data.cost,
+        isReimbursed: data.isReimbursed !== undefined ? data.isReimbursed : false, // Default to not reimbursed if not provided
+        receiptImageUri: data.receiptImageUri,
+        billImageUri: data.billImageUri,
       };
       return [...prevExpenses, newExpense].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     });
@@ -50,7 +54,13 @@ export function useExpenses() {
   const updateExpense = useCallback((id: string, data: Omit<Expense, 'id' | 'date'> & { date: Date }) => {
     setExpenses((prevExpenses) =>
       prevExpenses.map((exp) =>
-        exp.id === id ? { ...exp, ...data, date: data.date.toISOString().split('T')[0] } : exp
+        exp.id === id ? { 
+          ...exp, 
+          ...data, 
+          date: data.date.toISOString().split('T')[0],
+          // Ensure existing billImageUri is preserved if not in `data`
+          billImageUri: data.billImageUri !== undefined ? data.billImageUri : exp.billImageUri,
+        } : exp
       ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     );
   }, []);

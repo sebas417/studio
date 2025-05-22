@@ -6,6 +6,7 @@ export interface Expense {
   cost: number;
   isReimbursed: boolean;
   receiptImageUri?: string; // Optional: data URI of the uploaded receipt image
+  billImageUri?: string; // Optional: data URI of the uploaded bill image
 }
 
 export type ExpenseFormData = Omit<Expense, "id">;

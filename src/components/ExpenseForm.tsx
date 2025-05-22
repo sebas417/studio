@@ -16,7 +16,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import type { Expense } from "@/lib/types";
 import { extractData, type ExtractDataOutput } from "@/ai/flows/extract-data-from-receipt";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, UploadCloud, Wand2, CirclePlay /* Replaced GoogleDrive with a generic play icon for now */ } from "lucide-react";
+import { Loader2, UploadCloud, Wand2 } from "lucide-react";
 
 export const expenseFormSchema = z.object({
   date: z.date({ required_error: "Date is required." }),
@@ -25,6 +25,7 @@ export const expenseFormSchema = z.object({
   cost: z.coerce.number().positive("Cost must be a positive number."),
   isReimbursed: z.boolean().default(false),
   receiptImageUri: z.string().optional(),
+  billImageUri: z.string().optional(),
 });
 
 type ExpenseFormValues = z.infer<typeof expenseFormSchema>;
@@ -38,8 +39,11 @@ interface ExpenseFormProps {
 export function ExpenseForm({ initialData, onSubmit, isEditing = false }: ExpenseFormProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const [isExtracting, setIsExtracting] = React.useState(false);
-  const [uploadedFileName, setUploadedFileName] = React.useState<string | null>(null);
+
+  const [isExtractingReceipt, setIsExtractingReceipt] = React.useState(false);
+  const [uploadedReceiptFileName, setUploadedReceiptFileName] = React.useState<string | null>(null);
+  const [isExtractingBill, setIsExtractingBill] = React.useState(false);
+  const [uploadedBillFileName, setUploadedBillFileName] = React.useState<string | null>(null);
   
   const form = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseFormSchema),
@@ -54,70 +58,58 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
           patient: "",
           cost: 0,
           isReimbursed: false,
+          receiptImageUri: undefined,
+          billImageUri: undefined,
         },
   });
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAIDataPopulation = (extracted: ExtractDataOutput, documentType: "Receipt" | "Bill") => {
+    if (extracted.date) form.setValue("date", new Date(extracted.date), { shouldValidate: true });
+    if (extracted.provider) form.setValue("provider", extracted.provider, { shouldValidate: true });
+    if (extracted.patient) form.setValue("patient", extracted.patient, { shouldValidate: true });
+    if (extracted.cost) form.setValue("cost", extracted.cost, { shouldValidate: true });
+    toast({ title: `Data Extracted from ${documentType}`, description: `Fields populated from ${documentType.toLowerCase()}.` });
+  };
+
+  const handleFileUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    docType: "receipt" | "bill"
+  ) => {
     const file = event.target.files?.[0];
     if (file) {
-      setUploadedFileName(file.name);
-      setIsExtracting(true);
+      if (docType === "receipt") {
+        setUploadedReceiptFileName(file.name);
+        setIsExtractingReceipt(true);
+      } else {
+        setUploadedBillFileName(file.name);
+        setIsExtractingBill(true);
+      }
+
       const reader = new FileReader();
       reader.onloadend = async () => {
         const dataUri = reader.result as string;
-        form.setValue("receiptImageUri", dataUri); // Store for potential later use
+        if (docType === "receipt") {
+          form.setValue("receiptImageUri", dataUri);
+        } else {
+          form.setValue("billImageUri", dataUri);
+        }
+        
         try {
           const extracted = await extractData({ photoDataUri: dataUri });
-          if (extracted.date) form.setValue("date", new Date(extracted.date), { shouldValidate: true });
-          if (extracted.provider) form.setValue("provider", extracted.provider, { shouldValidate: true });
-          if (extracted.patient) form.setValue("patient", extracted.patient, { shouldValidate: true });
-          if (extracted.cost) form.setValue("cost", extracted.cost, { shouldValidate: true });
-          toast({ title: "Data Extracted", description: "Fields populated from receipt." });
+          handleAIDataPopulation(extracted, docType === "receipt" ? "Receipt" : "Bill");
         } catch (error) {
-          console.error("AI Extraction Error:", error);
-          toast({ variant: "destructive", title: "Extraction Failed", description: "Could not extract data from image. Please enter manually." });
+          console.error(`AI Extraction Error from ${docType}:`, error);
+          toast({ variant: "destructive", title: `${docType === "receipt" ? "Receipt" : "Bill"} Extraction Failed`, description: `Could not extract data from ${docType} image. Please enter manually.` });
         } finally {
-          setIsExtracting(false);
+          if (docType === "receipt") setIsExtractingReceipt(false);
+          else setIsExtractingBill(false);
         }
       };
       reader.readAsDataURL(file);
     }
   };
-
-  // Placeholder for Google Drive Picker integration
-  const handleGoogleDriveUpload = () => {
-    // In a real application, you would integrate with the Google Picker API here.
-    // This would involve:
-    // 1. Loading the Google API client library (gapi) and the Picker API.
-    //    Often done by adding <script src="https://apis.google.com/js/api.js"></script> to your HTML.
-    // 2. Setting up OAuth 2.0 credentials in Google Cloud Console.
-    // 3. Initializing the gapi client and Picker API, typically in a useEffect hook.
-    //    gapi.load('picker', initializePicker);
-    // 4. Authenticating the user with Google (gapi.auth2.init, gapi.auth2.getAuthInstance().signIn()).
-    // 5. Building and displaying the Google Picker:
-    //    const picker = new google.picker.PickerBuilder()
-    //      .addView(google.picker.ViewId.DOCS_IMAGES) // or other views
-    //      .setOAuthToken(accessToken) // User's Google OAuth token
-    //      .setDeveloperKey(YOUR_API_KEY) // Your Google Developer API Key
-    //      .setCallback(pickerCallback) // Function to handle selected files
-    //      .build();
-    //    picker.setVisible(true);
-    // 6. In pickerCallback(data):
-    //    if (data[google.picker.Response.ACTION] == google.picker.Action.PICKED) {
-    //      const file = data[google.picker.Response.DOCUMENTS][0];
-    //      const fileId = file[google.picker.Document.ID];
-    //      // Then use fileId with Google Drive API (gapi.client.drive.files.get) to get file content.
-    //      // Convert to Data URI and proceed with AI extraction.
-    //    }
-    // This is a simplified overview. Refer to Google Picker API documentation for details.
-
-    toast({
-      title: "Google Drive Upload",
-      description: "Google Drive integration is a placeholder and not yet fully implemented. See code comments for integration steps.",
-      variant: "default",
-      duration: 9000, // Longer duration for this informational toast
-    });
-  };
+  
+  const isAnyExtracting = isExtractingReceipt || isExtractingBill;
 
   const onFormSubmit = (data: ExpenseFormValues) => {
     onSubmit(data);
@@ -128,27 +120,38 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
       <CardHeader>
         <CardTitle>{isEditing ? "Edit Expense" : "Add New Expense"}</CardTitle>
         <CardDescription>
-          {isEditing ? "Update the details of your expense." : "Fill in the details of your new expense. You can upload a receipt to automatically extract information."}
+          {isEditing ? "Update the details of your expense." : "Fill in the details of your new expense. You can upload a receipt and/or a bill to automatically extract information."}
         </CardDescription>
       </CardHeader>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onFormSubmit)}>
           <CardContent className="space-y-6">
+            {/* Receipt Upload Section */}
             <div className="space-y-2">
-              <Label htmlFor="receiptUpload">Upload Receipt</Label>
+              <Label htmlFor="receiptUpload">Upload Receipt (Optional)</Label>
               <div className="flex flex-col sm:flex-row items-center gap-2">
-                <Input id="receiptUpload" type="file" accept="image/*" onChange={handleFileUpload} className="flex-grow" disabled={isExtracting}/>
-                <Button type="button" onClick={() => (document.getElementById('receiptUpload') as HTMLInputElement)?.click()} variant="outline" className="w-full sm:w-auto" disabled={isExtracting}>
-                  {isExtracting && !uploadedFileName ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
-                  Upload from Device
-                </Button>
-                <Button type="button" onClick={handleGoogleDriveUpload} variant="outline" className="w-full sm:w-auto" disabled={isExtracting}>
-                  <CirclePlay className="h-4 w-4 mr-2" /> {/* Using CirclePlay icon as GoogleDrive is not in lucide */}
-                  Upload from Drive
+                <Input id="receiptUpload" type="file" accept="image/*" onChange={(e) => handleFileUpload(e, "receipt")} className="flex-grow" disabled={isAnyExtracting}/>
+                <Button type="button" onClick={() => (document.getElementById('receiptUpload') as HTMLInputElement)?.click()} variant="outline" className="w-full sm:w-auto" disabled={isAnyExtracting}>
+                  {isExtractingReceipt ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
+                  Upload Receipt
                 </Button>
               </div>
-              {uploadedFileName && !isExtracting && <p className="text-sm text-muted-foreground">Uploaded: {uploadedFileName}</p>}
-              {isExtracting && <p className="text-sm text-primary flex items-center"><Wand2 className="h-4 w-4 mr-2 animate-pulse" />Extracting data...</p>}
+              {uploadedReceiptFileName && !isExtractingReceipt && <p className="text-sm text-muted-foreground">Uploaded Receipt: {uploadedReceiptFileName}</p>}
+              {isExtractingReceipt && <p className="text-sm text-primary flex items-center"><Wand2 className="h-4 w-4 mr-2 animate-pulse" />Extracting data from receipt...</p>}
+            </div>
+
+            {/* Bill Upload Section */}
+            <div className="space-y-2">
+              <Label htmlFor="billUpload">Upload Bill (Optional)</Label>
+              <div className="flex flex-col sm:flex-row items-center gap-2">
+                <Input id="billUpload" type="file" accept="image/*" onChange={(e) => handleFileUpload(e, "bill")} className="flex-grow" disabled={isAnyExtracting}/>
+                <Button type="button" onClick={() => (document.getElementById('billUpload') as HTMLInputElement)?.click()} variant="outline" className="w-full sm:w-auto" disabled={isAnyExtracting}>
+                  {isExtractingBill ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
+                  Upload Bill
+                </Button>
+              </div>
+              {uploadedBillFileName && !isExtractingBill && <p className="text-sm text-muted-foreground">Uploaded Bill: {uploadedBillFileName}</p>}
+              {isExtractingBill && <p className="text-sm text-primary flex items-center"><Wand2 className="h-4 w-4 mr-2 animate-pulse" />Extracting data from bill...</p>}
             </div>
 
             <FormField
@@ -226,8 +229,8 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
           </CardContent>
           <CardFooter className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
-            <Button type="submit" disabled={form.formState.isSubmitting || isExtracting}>
-              {form.formState.isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            <Button type="submit" disabled={form.formState.isSubmitting || isAnyExtracting}>
+              {(form.formState.isSubmitting || isAnyExtracting) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {isEditing ? "Save Changes" : "Add Expense"}
             </Button>
           </CardFooter>
@@ -236,6 +239,3 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     </Card>
   );
 }
-
-
-    

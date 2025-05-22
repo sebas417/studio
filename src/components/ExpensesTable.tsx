@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -18,8 +19,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Edit3, Trash2, FileText, Eye } from "lucide-react";
+import { MoreHorizontal, Edit3, Trash2, Eye, FileText } from "lucide-react";
 import type { Expense } from "@/lib/types";
 import { useExpenses } from "@/hooks/use-expenses";
 import { useToast } from "@/hooks/use-toast";
@@ -59,7 +61,7 @@ export function ExpensesTable({ expenses }: ExpensesTableProps) {
       deleteExpense(expenseToDelete);
       toast({
         title: "Expense Deleted",
-        description: `Expense for ${expense?.provider} on ${expense?.date} has been deleted.`,
+        description: `Expense for ${expense?.provider} on ${formatDate(expense?.date || new Date().toISOString())} has been deleted.`,
         variant: "destructive"
       });
       setExpenseToDelete(null);
@@ -127,12 +129,20 @@ export function ExpensesTable({ expenses }: ExpensesTableProps) {
                           <Edit3 className="mr-2 h-4 w-4" />
                           Edit
                         </DropdownMenuItem>
+                        {(expense.receiptImageUri || expense.billImageUri) && <DropdownMenuSeparator />}
                         {expense.receiptImageUri && (
                            <DropdownMenuItem onClick={() => window.open(expense.receiptImageUri, '_blank')}>
                              <Eye className="mr-2 h-4 w-4" />
                              View Receipt
                            </DropdownMenuItem>
                         )}
+                        {expense.billImageUri && (
+                           <DropdownMenuItem onClick={() => window.open(expense.billImageUri, '_blank')}>
+                             <FileText className="mr-2 h-4 w-4" />
+                             View Bill
+                           </DropdownMenuItem>
+                        )}
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onClick={() => handleDeleteConfirmation(expense.id)}
                           className="text-destructive focus:text-destructive focus:bg-destructive/10"
@@ -173,5 +183,6 @@ export function ExpensesTable({ expenses }: ExpensesTableProps) {
 // This might not be needed if your setup exports it.
 const buttonVariants = ({ variant }: { variant: "destructive" | "outline" | "default" | "secondary" | "ghost" | "link" }) => {
   if (variant === "destructive") return "bg-destructive text-destructive-foreground hover:bg-destructive/90";
+  if (variant === "outline") return "border border-input bg-background hover:bg-accent hover:text-accent-foreground";
   return "";
 };
