@@ -22,22 +22,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
 
   useEffect(() => {
+    console.log("[AuthContext] Setting up onAuthStateChanged listener.");
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log("[AuthContext] onAuthStateChanged triggered. User:", user);
       setCurrentUser(user);
       setLoading(false);
     });
-    return () => unsubscribe();
+    return () => {
+      console.log("[AuthContext] Cleaning up onAuthStateChanged listener.");
+      unsubscribe();
+    }
   }, []);
 
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
+    console.log("[AuthContext] Attempting to sign in with Google...");
     try {
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      console.log("[AuthContext] Google Sign-In successful. Result:", result);
       // Successful sign-in will be handled by onAuthStateChanged, which updates currentUser.
       // Other components (like RootPage or AppLayout) will react to currentUser change for redirection.
-      // No explicit router.push here to simplify.
     } catch (error: any) {
-      console.error("Error signing in with Google: ", error);
+      console.error("[AuthContext] Error signing in with Google: ", error);
+      console.error("[AuthContext] Error Code:", error.code);
+      console.error("[AuthContext] Error Message:", error.message);
       if (error.code === 'auth/popup-closed-by-user') {
         toast({
           title: "Sign-In Cancelled",
@@ -64,11 +72,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOutUser = async () => {
+    console.log("[AuthContext] Attempting to sign out...");
     try {
       await signOut(auth);
+      console.log("[AuthContext] Sign-out successful.");
       router.push('/'); // Redirect to home or a public page after sign-out
     } catch (error: any) {
-      console.error("Error signing out: ", error);
+      console.error("[AuthContext] Error signing out: ", error);
       toast({
         title: "Sign-Out Failed",
         description: error.message || "An unexpected error occurred during sign-out.",
