@@ -19,7 +19,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, UploadCloud, Wand2 } from "lucide-react";
 
 export const expenseFormSchema = z.object({
-  date: z.date({ required_error: "Date is required." }),
+  date: z.date({ required_error: "Date of Service/Purchase is required." }),
+  dateOfPayment: z.date().optional(),
   provider: z.string().min(1, "Provider is required."),
   patient: z.string().min(1, "Patient is required."),
   cost: z.coerce.number().positive("Cost must be a positive number."),
@@ -37,7 +38,7 @@ interface ExpenseFormProps {
 }
 
 // Helper function to parse YYYY-MM-DD string to a local Date object
-const parseDateStringToLocal = (dateStr: string | undefined): Date => {
+const parseDateStringToLocal = (dateStr: string | undefined): Date | undefined => {
   if (dateStr) {
     const parts = dateStr.split('-');
     if (parts.length === 3) {
@@ -50,7 +51,7 @@ const parseDateStringToLocal = (dateStr: string | undefined): Date => {
       }
     }
   }
-  return new Date(); // Fallback to current date if parsing fails or no dateStr
+  return undefined; 
 };
 
 
@@ -120,11 +121,13 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     defaultValues: initialData
       ? {
           ...initialData,
-          date: parseDateStringToLocal(initialData.date),
+          date: parseDateStringToLocal(initialData.date) || new Date(),
+          dateOfPayment: parseDateStringToLocal(initialData.dateOfPayment),
           isReimbursedInput: initialData.isReimbursed,
         }
       : {
           date: new Date(),
+          dateOfPayment: undefined,
           provider: "",
           patient: "",
           cost: 0,
@@ -140,7 +143,8 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     if (initialData) {
       form.reset({
         ...initialData,
-        date: parseDateStringToLocal(initialData.date),
+        date: parseDateStringToLocal(initialData.date) || new Date(),
+        dateOfPayment: parseDateStringToLocal(initialData.dateOfPayment),
         isReimbursedInput: initialData.isReimbursed,
       });
       if(initialData.receiptImageUri) {
@@ -150,14 +154,17 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
         setUploadedBillFileName(initialData.billImageUri.startsWith('data:') ? "Stored Bill" : initialData.billImageUri);
       }
     }
-  }, [initialData, form]); // form.reset was causing infinite loop if form was in dependencies.
+  }, [initialData, form]);
 
   const handleAIDataPopulation = (extracted: ExtractDataOutput, documentType: "Receipt" | "Bill") => {
     // Populate if AI has value AND field is not dirty (not manually changed by user)
     if (extracted.date && !dirtyFields.date) {
         const parsedDate = parseDateStringToLocal(extracted.date);
-        // Check if date is valid (parseDateStringToLocal returns current date on failure, which is fine for setValue)
-        form.setValue("date", parsedDate, { shouldValidate: true });
+        if (parsedDate) form.setValue("date", parsedDate, { shouldValidate: true });
+    }
+    if (extracted.dateOfPayment && !dirtyFields.dateOfPayment && documentType === "Receipt") { // Only populate for receipts
+        const parsedPaymentDate = parseDateStringToLocal(extracted.dateOfPayment);
+        if (parsedPaymentDate) form.setValue("dateOfPayment", parsedPaymentDate, { shouldValidate: true });
     }
     if (extracted.provider && !dirtyFields.provider) {
       form.setValue("provider", extracted.provider, { shouldValidate: true });
@@ -173,11 +180,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
 
   const processImageForAI = async (dataUri: string, docType: "receipt" | "bill", fileName: string) => {
     const currentSetter = docType === "receipt" ? setIsExtractingReceipt : setIsExtractingBill;
-    const currentFileNameSetter = docType === "receipt" ? setUploadedReceiptFileName : setUploadedBillFileName;
     
-    // Note: currentSetter(true) and currentFileNameSetter(fileName) are called in handleFileUpload before this
-    // So the visual state for "loading" is already active.
-
     if (docType === "receipt") {
       form.setValue("receiptImageUri", dataUri);
     } else {
@@ -186,16 +189,16 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
 
     const currentFormValues = form.getValues();
     const isScanWorthSkipping = 
-        (dirtyFields.provider || currentFormValues.provider !== "") &&
-        (dirtyFields.patient || currentFormValues.patient !== "") &&
-        (dirtyFields.cost || (currentFormValues.cost !== 0 && currentFormValues.cost > 0)) &&
-        (dirtyFields.date); // Consider date also if it's typically extracted
-
+        (dirtyFields.provider || (currentFormValues.provider && currentFormValues.provider !== "")) &&
+        (dirtyFields.patient || (currentFormValues.patient && currentFormValues.patient !== "")) &&
+        (dirtyFields.cost || (currentFormValues.cost && currentFormValues.cost > 0)) &&
+        (dirtyFields.date) && // Date is required, so it will always be "dirty" or have a value
+        (docType === "receipt" ? (dirtyFields.dateOfPayment || currentFormValues.dateOfPayment) : true); // Only check dateOfPayment for receipts
 
     if (isScanWorthSkipping) {
       toast({
         title: "Fields Already Populated",
-        description: "AI extraction skipped. To re-extract, please clear the relevant fields first.",
+        description: "AI extraction skipped as key fields are filled. To re-extract, please clear fields first.",
         duration: 5000,
       });
       currentSetter(false);
@@ -233,7 +236,6 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
         } catch (compressionError) {
           console.error("Image compression error:", compressionError);
           toast({ variant: "destructive", title: "Image Processing Failed", description: "Could not compress the image. Using original file." });
-          // Fallback: read original file as data URI if compression fails
           dataUriForProcessing = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result as string);
@@ -242,7 +244,6 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
           });
         }
       } else if (file.type === "application/pdf") {
-         // For PDFs, just read as data URI without client-side compression
         dataUriForProcessing = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
@@ -257,13 +258,11 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
         return;
       }
       
-      // processImageForAI will handle its own loading state specific to AI call
-      // and will set currentSetterLoading(false) in its finally block.
       await processImageForAI(dataUriForProcessing, docType, file.name);
     }
   };
     
-  const isProcessingImage = isExtractingReceipt || isExtractingBill; // General "busy" state for form inputs
+  const isProcessingImage = isExtractingReceipt || isExtractingBill; 
 
   const onFormSubmit = (data: ExpenseFormValues) => {
     onSubmit(data);
@@ -320,6 +319,20 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
                     <FormControl>
                       <DatePicker date={field.value} setDate={field.onChange} disabled={isProcessingImage} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="dateOfPayment"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Date of Payment (from Receipt)</FormLabel>
+                    <FormControl>
+                      <DatePicker date={field.value} setDate={field.onChange} disabled={isProcessingImage} />
+                    </FormControl>
+                    <FormDescription>Optional. The date payment was made, if shown on the receipt.</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -398,5 +411,3 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     </>
   );
 }
-
-    

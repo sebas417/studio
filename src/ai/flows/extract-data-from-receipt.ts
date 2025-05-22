@@ -26,6 +26,7 @@ const ExtractDataOutputSchema = z.object({
   provider: z.string().describe('The name of the provider.'),
   patient: z.string().describe('The name of the patient.'),
   cost: z.number().describe('The total cost on the receipt or bill.'),
+  dateOfPayment: z.string().optional().describe('The date of payment from the receipt, if explicitly present, formatted strictly as YYYY-MM-DD. This might be different from the date of service and may not always be available.'),
 });
 export type ExtractDataOutput = z.infer<typeof ExtractDataOutputSchema>;
 
@@ -40,14 +41,15 @@ const extractDataPrompt = ai.definePrompt({
   prompt: `You are an expert data extraction specialist.
 
 You will be provided with an image of a receipt or bill. You will extract the
-following information from the receipt or bill:
+following information from the document:
 
 - Date of Service/Transaction: Identify the date related to the actual service, purchase, or transaction. If multiple dates are present (e.g., print date, due date, order date, service date), prioritize the *earliest date* that appears to be the actual service or transaction date. Ensure the date is formatted strictly as YYYY-MM-DD. For example, if the receipt shows 'March 15, 2024' as the transaction date, you should output '2024-03-15'. If the year is not explicitly mentioned but is clearly the current year or can be inferred, use that year.
 - Provider: The name of the provider.
 - Patient: The name of the patient.
 - Cost: The total cost on the receipt or bill.
+- Date of Payment (from Receipt): If the document is clearly a receipt and explicitly states a "Date of Payment" or similar (which might be the same as or different from the Date of Service/Transaction), extract this date. Format it strictly as YYYY-MM-DD. If no clear payment date is found, this field can be omitted.
 
-Here is the receipt or bill:
+Here is the document:
 
 {{media url=photoDataUri}}
 

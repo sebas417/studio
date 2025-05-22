@@ -34,29 +34,30 @@ export function useExpenses() {
           description: "Failed to load expenses. Data might be corrupted.",
         });
       }
-      // localStorage.removeItem(STORAGE_KEY); // Optionally clear corrupted storage
     }
     setIsLoading(false);
   }, []);
 
   useEffect(() => {
-    if (!isLoading) { // Only save when not initially loading
+    if (!isLoading) { 
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
       } catch (error) {
-        console.error("Failed to save expenses to localStorage:", error); // This log will be picked up by Next.js overlay
-        if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+        console.error("Failed to save expenses to localStorage:", error);
+        const isQuotaError = error instanceof DOMException && 
+                             (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+
+        if (isQuotaError) {
           toast({
             variant: "destructive",
             title: "Storage Full",
-            description: "Could not save image data as browser storage is full. Attempting to save other expense details. Please consider clearing some site data or reducing image uploads.",
+            description: "Could not save image data as browser storage is full. Attempting to save other expense details...",
             duration: 9000, 
           });
-          // Attempt to save without images
           try {
             const expensesWithoutImages = expenses.map(exp => {
               const { receiptImageUri, billImageUri, ...rest } = exp;
-              return rest; // isReimbursed and other fields are preserved in ...rest
+              return rest;
             });
             localStorage.setItem(STORAGE_KEY, JSON.stringify(expensesWithoutImages));
              toast({
@@ -82,11 +83,12 @@ export function useExpenses() {
     }
   }, [expenses, isLoading]);
 
-  const addExpense = useCallback((data: Omit<Expense, 'id' | 'date'> & { date: Date; receiptImageUri?: string; billImageUri?: string; isReimbursedInput?: boolean }) => {
+  const addExpense = useCallback((data: Omit<Expense, 'id' | 'date' | 'dateOfPayment'> & { date: Date; dateOfPayment?: Date; receiptImageUri?: string; billImageUri?: string; isReimbursedInput?: boolean }) => {
     setExpenses((prevExpenses) => {
       const newExpense: Expense = {
         id: uuidv4(),
-        date: data.date.toISOString().split('T')[0], // Store date as YYYY-MM-DD string
+        date: data.date.toISOString().split('T')[0], 
+        dateOfPayment: data.dateOfPayment ? data.dateOfPayment.toISOString().split('T')[0] : undefined,
         provider: data.provider,
         patient: data.patient,
         cost: data.cost,
@@ -98,15 +100,15 @@ export function useExpenses() {
     });
   }, []);
 
-  const updateExpense = useCallback((id: string, data: Omit<Expense, 'id' | 'date'> & { date: Date; isReimbursedInput?: boolean; receiptImageUri?: string; billImageUri?: string }) => {
+  const updateExpense = useCallback((id: string, data: Omit<Expense, 'id' | 'date' | 'dateOfPayment'> & { date: Date; dateOfPayment?: Date; isReimbursedInput?: boolean; receiptImageUri?: string; billImageUri?: string }) => {
     setExpenses((prevExpenses) =>
       prevExpenses.map((exp) =>
         exp.id === id ? {
           ...exp,
           ...data,
           date: data.date.toISOString().split('T')[0],
+          dateOfPayment: data.dateOfPayment ? data.dateOfPayment.toISOString().split('T')[0] : (data.dateOfPayment === null ? undefined : exp.dateOfPayment), // Handle explicit null to clear, else retain existing
           isReimbursed: data.isReimbursedInput !== undefined ? data.isReimbursedInput : (data as any).isReimbursed !== undefined ? (data as any).isReimbursed : exp.isReimbursed,
-          // Ensure existing image URIs are preserved if not explicitly overwritten by `data`
           receiptImageUri: data.receiptImageUri !== undefined ? data.receiptImageUri : exp.receiptImageUri,
           billImageUri: data.billImageUri !== undefined ? data.billImageUri : exp.billImageUri,
         } : exp
