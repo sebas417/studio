@@ -6,7 +6,8 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Expense } from '@/lib/types';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from "@/hooks/use-toast";
-import { db, storage } from '@/lib/firebase';
+import { db, storage, auth as firebaseAuth } from '@/lib/firebase'; // Added firebaseAuth
+import { useAuth } from '@/contexts/AuthContext'; // Added
 import {
   collection,
   addDoc,
@@ -18,12 +19,12 @@ import {
   orderBy,
   Timestamp,
   serverTimestamp,
-  // writeBatch, // Not used yet
-  // getDoc, // Not used directly here for expense data, onSnapshot handles it
+  where, // Added
+  // writeBatch,
+  // getDoc, 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
-// Define a type for the data coming from Firestore, which might use Timestamps
 interface FirestoreExpenseDoc {
   id?: string;
   date: Timestamp;
@@ -32,22 +33,35 @@ interface FirestoreExpenseDoc {
   patient: string;
   cost: number;
   isReimbursed: boolean;
-  receiptImageUri?: string | null; // Can be string or null
-  billImageUri?: string | null;   // Can be string or null
+  receiptImageUri?: string | null;
+  billImageUri?: string | null;
   createdAt: Timestamp;
-  // userId: string; // TODO: Add when authentication is implemented
+  userId: string; // Added userId
 }
 
 
 export function useExpenses() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const { currentUser } = useAuth(); // Added
 
   useEffect(() => {
+    if (!currentUser) {
+      setExpenses([]);
+      setIsLoading(false);
+      return; // Don't fetch if no user
+    }
+
     setIsLoading(true);
     const expensesCollectionRef = collection(db, 'expenses');
-    // Query requires a composite index on (date desc, createdAt desc)
-    const q = query(expensesCollectionRef, orderBy('date', 'desc'), orderBy('createdAt', 'desc'));
+    // Query now includes where clause for userId and requires a composite index
+    // Index: userId ASC, date DESC, createdAt DESC
+    const q = query(
+      expensesCollectionRef,
+      where('userId', '==', currentUser.uid),
+      orderBy('date', 'desc'),
+      orderBy('createdAt', 'desc')
+    );
 
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const expensesData: Expense[] = [];
@@ -61,8 +75,9 @@ export function useExpenses() {
           patient: data.patient,
           cost: data.cost,
           isReimbursed: data.isReimbursed,
-          receiptImageUri: data.receiptImageUri || undefined, // Convert null from DB to undefined for type consistency
-          billImageUri: data.billImageUri || undefined,     // Convert null from DB to undefined for type consistency
+          receiptImageUri: data.receiptImageUri || undefined,
+          billImageUri: data.billImageUri || undefined,
+          // userId is implicitly handled by the query
         });
       });
       setExpenses(expensesData);
@@ -72,13 +87,13 @@ export function useExpenses() {
       toast({
         variant: "destructive",
         title: "Error Loading Expenses",
-        description: "Could not fetch expenses from the database. " + error.message,
+        description: "Could not fetch expenses. " + error.message,
       });
       setIsLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [currentUser]); // Re-run when currentUser changes
 
   const addExpense = useCallback(async (
     data: Omit<Expense, 'id' | 'date' | 'dateOfPayment'> & { 
@@ -89,6 +104,10 @@ export function useExpenses() {
       isReimbursedInput?: boolean 
     }
   ) => {
+    if (!currentUser) {
+      toast({ variant: "destructive", title: "Not Authenticated", description: "You must be logged in to add an expense." });
+      return;
+    }
     setIsLoading(true);
     try {
       let receiptImageUrl: string | undefined = undefined;
@@ -96,13 +115,15 @@ export function useExpenses() {
 
       if (data.receiptImageFile) {
         const receiptFileName = (data.receiptImageFile instanceof File) ? data.receiptImageFile.name : 'receipt.jpg';
-        const receiptRef = ref(storage, `expense_images/receipts/${uuidv4()}-${receiptFileName}`);
+        // Path now includes userId
+        const receiptRef = ref(storage, `expense_images/${currentUser.uid}/receipts/${uuidv4()}-${receiptFileName}`);
         await uploadBytes(receiptRef, data.receiptImageFile);
         receiptImageUrl = await getDownloadURL(receiptRef);
       }
       if (data.billImageFile) {
         const billFileName = (data.billImageFile instanceof File) ? data.billImageFile.name : 'bill.jpg';
-        const billRef = ref(storage, `expense_images/bills/${uuidv4()}-${billFileName}`);
+        // Path now includes userId
+        const billRef = ref(storage, `expense_images/${currentUser.uid}/bills/${uuidv4()}-${billFileName}`);
         await uploadBytes(billRef, data.billImageFile);
         billImageUrl = await getDownloadURL(billRef);
       }
@@ -114,20 +135,21 @@ export function useExpenses() {
         patient: data.patient,
         cost: data.cost,
         isReimbursed: data.isReimbursedInput ?? false,
-        receiptImageUri: receiptImageUrl || null, // Ensure null instead of undefined
-        billImageUri: billImageUrl || null,       // Ensure null instead of undefined
+        receiptImageUri: receiptImageUrl || null,
+        billImageUri: billImageUrl || null,
+        userId: currentUser.uid, // Added userId
         createdAt: serverTimestamp()
       };
       
       await addDoc(collection(db, 'expenses'), newExpenseData);
-      toast({ title: "Expense Added", description: "Successfully added to database."});
+      toast({ title: "Expense Added", description: "Successfully added."});
     } catch (error: any) {
       console.error("Error adding expense to Firestore:", error);
       toast({ variant: "destructive", title: "Error Adding Expense", description: error.message || String(error) });
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   const updateExpense = useCallback(async (
     id: string, 
@@ -137,74 +159,85 @@ export function useExpenses() {
       receiptImageFile?: File | Blob; 
       billImageFile?: File | Blob; 
       isReimbursedInput?: boolean;
-      receiptImageUri?: string; // Existing URI from form state
-      billImageUri?: string;   // Existing URI from form state
+      receiptImageUri?: string; 
+      billImageUri?: string;
     }
   ) => {
+    if (!currentUser) {
+      toast({ variant: "destructive", title: "Not Authenticated", description: "You must be logged in to update an expense." });
+      return;
+    }
     setIsLoading(true);
     const expenseRef = doc(db, 'expenses', id);
     try {
-      let finalReceiptImageUrl: string | null | undefined = data.receiptImageUri; // Start with existing URI from form
-      let finalBillImageUrl: string | null | undefined = data.billImageUri;       // Start with existing URI from form
+      // Important: Add a check here to ensure the user owns this document before updating in a real app (using security rules is better)
+      let finalReceiptImageUrl: string | null | undefined = data.receiptImageUri; 
+      let finalBillImageUrl: string | null | undefined = data.billImageUri;       
 
+      const currentExpense = expenses.find(exp => exp.id === id);
 
       if (data.receiptImageFile) {
-        // Optional: Delete old image from storage if replacing
-        // const currentExpense = expenses.find(exp => exp.id === id);
-        // if (currentExpense?.receiptImageUri) { try { await deleteObject(ref(storage, currentExpense.receiptImageUri)); } catch(e) { /* ignore */ } }
+        if (currentExpense?.receiptImageUri) { 
+          try { 
+            const oldReceiptRef = ref(storage, currentExpense.receiptImageUri);
+            await deleteObject(oldReceiptRef); 
+          } catch(e) { console.warn("Old receipt image not found or deletion failed", e); } 
+        }
         const receiptFileName = (data.receiptImageFile instanceof File) ? data.receiptImageFile.name : 'receipt.jpg';
-        const receiptRef = ref(storage, `expense_images/receipts/${uuidv4()}-${receiptFileName}`);
+        const receiptRef = ref(storage, `expense_images/${currentUser.uid}/receipts/${uuidv4()}-${receiptFileName}`);
         await uploadBytes(receiptRef, data.receiptImageFile);
         finalReceiptImageUrl = await getDownloadURL(receiptRef);
       }
 
       if (data.billImageFile) {
-        // Optional: Delete old image from storage
-        // const currentExpense = expenses.find(exp => exp.id === id);
-        // if (currentExpense?.billImageUri) { try { await deleteObject(ref(storage, currentExpense.billImageUri)); } catch(e) { /* ignore */ } }
+         if (currentExpense?.billImageUri) { 
+          try { 
+            const oldBillRef = ref(storage, currentExpense.billImageUri);
+            await deleteObject(oldBillRef);
+          } catch(e) { console.warn("Old bill image not found or deletion failed", e); } 
+        }
         const billFileName = (data.billImageFile instanceof File) ? data.billImageFile.name : 'bill.jpg';
-        const billRef = ref(storage, `expense_images/bills/${uuidv4()}-${billFileName}`);
+        const billRef = ref(storage, `expense_images/${currentUser.uid}/bills/${uuidv4()}-${billFileName}`);
         await uploadBytes(billRef, data.billImageFile);
         finalBillImageUrl = await getDownloadURL(billRef);
       }
       
-      const updatedFields: Partial<FirestoreExpenseDoc> = {
+      const updatedFields: Partial<Omit<FirestoreExpenseDoc, 'id' | 'createdAt' | 'userId'>> = { // userId should not be updated here
         date: Timestamp.fromDate(data.date),
         provider: data.provider,
         patient: data.patient,
         cost: data.cost,
-        isReimbursed: data.isReimbursedInput ?? (data as any).isReimbursed ?? false,
-        // Set to null if undefined, otherwise use the value for image URIs
+        isReimbursed: data.isReimbursedInput ?? (currentExpense as any)?.isReimbursed ?? false,
         receiptImageUri: (finalReceiptImageUrl === undefined) ? null : finalReceiptImageUrl,
         billImageUri: (finalBillImageUrl === undefined) ? null : finalBillImageUrl,
       };
 
-      // Handle dateOfPayment carefully for updates:
-      // - If data.dateOfPayment is a Date, convert to Timestamp.
-      // - If data.dateOfPayment is null (form field cleared), set to null in Firestore.
-      // - If data.dateOfPayment is undefined (form field not touched and was not initially set), do not include in update.
       if (data.dateOfPayment instanceof Date) {
         updatedFields.dateOfPayment = Timestamp.fromDate(data.dateOfPayment);
-      } else if (data.dateOfPayment === null) {
+      } else if (data.dateOfPayment === null) { // Explicitly cleared
         updatedFields.dateOfPayment = null;
       }
-      // If data.dateOfPayment is undefined, it's omitted from updatedFields, meaning "no change".
+      // If undefined, it's not included, so no change to dateOfPayment unless specified
 
       await updateDoc(expenseRef, updatedFields);
-      toast({ title: "Expense Updated", description: "Changes saved to database." });
+      toast({ title: "Expense Updated", description: "Changes saved." });
     } catch (error: any) {
       console.error("Error updating expense in Firestore:", error);
       toast({ variant: "destructive", title: "Error Updating Expense", description: error.message || String(error) });
     } finally {
       setIsLoading(false);
     }
-  }, []); // Removed 'expenses' from dependency array as direct mutation is avoided; using onSnapshot for updates.
+  }, [currentUser, expenses]);
 
   const deleteExpense = useCallback(async (id: string) => {
+    if (!currentUser) {
+      toast({ variant: "destructive", title: "Not Authenticated", description: "You must be logged in to delete an expense." });
+      return;
+    }
     setIsLoading(true);
     const expenseRef = doc(db, 'expenses', id);
     try {
-      const expenseToDelete = expenses.find(exp => exp.id === id); // Find from local state to get URIs
+      const expenseToDelete = expenses.find(exp => exp.id === id); 
       if (expenseToDelete?.receiptImageUri) {
         try { await deleteObject(ref(storage, expenseToDelete.receiptImageUri)); }
         catch (e) { console.warn("Error deleting receipt image from Storage or already deleted:", e); }
@@ -215,21 +248,22 @@ export function useExpenses() {
       }
 
       await deleteDoc(expenseRef);
-      // Toast is handled by onSnapshot updates triggering UI change, but explicit toast is fine too.
-      // toast({ title: "Expense Deleted", description: "Removed from database.", variant: "destructive" });
+      // Toast handled by onSnapshot updates, or add one here if preferred
     } catch (error: any) {
       console.error("Error deleting expense from Firestore:", error);
       toast({ variant: "destructive", title: "Error Deleting Expense", description: error.message || String(error) });
     } finally {
       setIsLoading(false);
     }
-  }, [expenses]); // Keep 'expenses' here if used to find URIs for deletion
+  }, [currentUser, expenses]);
 
   const getExpenseById = useCallback((id: string): Expense | undefined => {
+    // This will only find expenses already loaded for the current user
     return expenses.find((exp) => exp.id === id);
   }, [expenses]);
 
   const toggleReimbursement = useCallback(async (id: string) => {
+    if (!currentUser) return;
     const expense = expenses.find((exp) => exp.id === id);
     if (!expense) return;
 
@@ -242,9 +276,10 @@ export function useExpenses() {
       console.error("Error toggling reimbursement status:", error);
       toast({ variant: "destructive", title: "Update Error", description: "Could not change reimbursement status: " + error.message });
     }
-  }, [expenses]);
+  }, [currentUser, expenses]);
   
   const getDashboardSummary = useCallback(() => {
+    // This summary is now based on the current user's loaded expenses
     const totalExpenses = expenses.reduce((sum, exp) => sum + exp.cost, 0);
     const totalReimbursed = expenses
       .filter(exp => exp.isReimbursed)
@@ -275,4 +310,3 @@ export function useExpenses() {
     getDashboardSummary,
   };
 }
-
