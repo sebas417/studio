@@ -36,6 +36,24 @@ interface ExpenseFormProps {
   isEditing?: boolean;
 }
 
+// Helper function to parse YYYY-MM-DD string to a local Date object
+const parseDateStringToLocal = (dateStr: string | undefined): Date => {
+  if (dateStr) {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed in JS Date
+      const day = parseInt(parts[2], 10);
+      if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+        // This creates a Date object at midnight in the local timezone
+        return new Date(year, month, day);
+      }
+    }
+  }
+  return new Date(); // Fallback to current date if parsing fails or no dateStr
+};
+
+
 async function processAndCompressImage(
   file: File, 
   maxWidth: number = 1024, 
@@ -102,7 +120,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     defaultValues: initialData
       ? {
           ...initialData,
-          date: initialData.date ? new Date(initialData.date) : new Date(),
+          date: parseDateStringToLocal(initialData.date),
           isReimbursedInput: initialData.isReimbursed,
         }
       : {
@@ -122,7 +140,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     if (initialData) {
       form.reset({
         ...initialData,
-        date: initialData.date ? new Date(initialData.date) : new Date(),
+        date: parseDateStringToLocal(initialData.date),
         isReimbursedInput: initialData.isReimbursed,
       });
       if(initialData.receiptImageUri) {
@@ -137,13 +155,9 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
   const handleAIDataPopulation = (extracted: ExtractDataOutput, documentType: "Receipt" | "Bill") => {
     // Populate if AI has value AND field is not dirty (not manually changed by user)
     if (extracted.date && !dirtyFields.date) {
-        const parsedDate = new Date(extracted.date);
-        // Check if date is valid, sometimes AI might return "today" or other non-date strings
-        if (!isNaN(parsedDate.getTime())) {
-            form.setValue("date", parsedDate, { shouldValidate: true });
-        } else {
-            console.warn(`AI extracted invalid date: ${extracted.date}`);
-        }
+        const parsedDate = parseDateStringToLocal(extracted.date);
+        // Check if date is valid (parseDateStringToLocal returns current date on failure, which is fine for setValue)
+        form.setValue("date", parsedDate, { shouldValidate: true });
     }
     if (extracted.provider && !dirtyFields.provider) {
       form.setValue("provider", extracted.provider, { shouldValidate: true });
@@ -384,3 +398,5 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     </>
   );
 }
+
+    
