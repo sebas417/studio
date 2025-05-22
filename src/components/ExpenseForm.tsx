@@ -36,6 +36,58 @@ interface ExpenseFormProps {
   isEditing?: boolean;
 }
 
+async function processAndCompressImage(
+  file: File, 
+  maxWidth: number = 1024, 
+  maxHeight: number = 1024, 
+  quality: number = 0.7
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+          return reject(new Error('Failed to get canvas context'));
+        }
+
+        ctx.filter = 'grayscale(100%)'; // Apply grayscale
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', quality); // Compress to JPEG
+        resolve(dataUrl);
+      };
+      img.onerror = (err) => reject(new Error(`Image load error: ${err}`));
+      if (event.target?.result) {
+        img.src = event.target.result as string;
+      } else {
+        reject(new Error('Failed to read image for compression'));
+      }
+    };
+    reader.onerror = (err) => reject(new Error(`File read error: ${err}`));
+    reader.readAsDataURL(file);
+  });
+}
+
 export function ExpenseForm({ initialData, onSubmit, isEditing = false }: ExpenseFormProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -80,11 +132,18 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
         setUploadedBillFileName(initialData.billImageUri.startsWith('data:') ? "Stored Bill" : initialData.billImageUri);
       }
     }
-  }, [initialData, form.reset, form]);
+  }, [initialData, form]); // form.reset was causing infinite loop if form was in dependencies.
 
   const handleAIDataPopulation = (extracted: ExtractDataOutput, documentType: "Receipt" | "Bill") => {
+    // Populate if AI has value AND field is not dirty (not manually changed by user)
     if (extracted.date && !dirtyFields.date) {
-      form.setValue("date", new Date(extracted.date), { shouldValidate: true });
+        const parsedDate = new Date(extracted.date);
+        // Check if date is valid, sometimes AI might return "today" or other non-date strings
+        if (!isNaN(parsedDate.getTime())) {
+            form.setValue("date", parsedDate, { shouldValidate: true });
+        } else {
+            console.warn(`AI extracted invalid date: ${extracted.date}`);
+        }
     }
     if (extracted.provider && !dirtyFields.provider) {
       form.setValue("provider", extracted.provider, { shouldValidate: true });
@@ -92,7 +151,6 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     if (extracted.patient && !dirtyFields.patient) {
       form.setValue("patient", extracted.patient, { shouldValidate: true });
     }
-    // Only set cost if AI extracted a positive value and the cost field hasn't been manually edited
     if (extracted.cost && extracted.cost > 0 && !dirtyFields.cost) {
       form.setValue("cost", extracted.cost, { shouldValidate: true });
     }
@@ -103,8 +161,8 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     const currentSetter = docType === "receipt" ? setIsExtractingReceipt : setIsExtractingBill;
     const currentFileNameSetter = docType === "receipt" ? setUploadedReceiptFileName : setUploadedBillFileName;
     
-    currentSetter(true);
-    currentFileNameSetter(fileName); 
+    // Note: currentSetter(true) and currentFileNameSetter(fileName) are called in handleFileUpload before this
+    // So the visual state for "loading" is already active.
 
     if (docType === "receipt") {
       form.setValue("receiptImageUri", dataUri);
@@ -113,7 +171,12 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     }
 
     const currentFormValues = form.getValues();
-    const isScanWorthSkipping = currentFormValues.provider !== "" && currentFormValues.patient !== "" && currentFormValues.cost > 0;
+    const isScanWorthSkipping = 
+        (dirtyFields.provider || currentFormValues.provider !== "") &&
+        (dirtyFields.patient || currentFormValues.patient !== "") &&
+        (dirtyFields.cost || (currentFormValues.cost !== 0 && currentFormValues.cost > 0)) &&
+        (dirtyFields.date); // Consider date also if it's typically extracted
+
 
     if (isScanWorthSkipping) {
       toast({
@@ -142,16 +205,51 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
   ) => {
     const file = event.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const dataUri = reader.result as string;
-        await processImageForAI(dataUri, docType, file.name);
-      };
-      reader.readAsDataURL(file);
+      let dataUriForProcessing: string;
+      const currentSetterLoading = docType === "receipt" ? setIsExtractingReceipt : setIsExtractingBill;
+      const currentFileNameSetter = docType === "receipt" ? setUploadedReceiptFileName : setUploadedBillFileName;
+      
+      currentSetterLoading(true); 
+      currentFileNameSetter(file.name);
+
+      if (file.type.startsWith("image/")) {
+        try {
+          toast({ title: "Processing Image...", description: "Compressing and preparing your image.", duration: 3000 });
+          dataUriForProcessing = await processAndCompressImage(file);
+        } catch (compressionError) {
+          console.error("Image compression error:", compressionError);
+          toast({ variant: "destructive", title: "Image Processing Failed", description: "Could not compress the image. Using original file." });
+          // Fallback: read original file as data URI if compression fails
+          dataUriForProcessing = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        }
+      } else if (file.type === "application/pdf") {
+         // For PDFs, just read as data URI without client-side compression
+        dataUriForProcessing = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      } else {
+        toast({ variant: "destructive", title: "Unsupported File Type", description: "Please upload an image (JPG, PNG, etc.) or a PDF." });
+        currentSetterLoading(false);
+        currentFileNameSetter(null); 
+        if (docType === "receipt") form.setValue("receiptImageUri", undefined); else form.setValue("billImageUri", undefined);
+        return;
+      }
+      
+      // processImageForAI will handle its own loading state specific to AI call
+      // and will set currentSetterLoading(false) in its finally block.
+      await processImageForAI(dataUriForProcessing, docType, file.name);
     }
   };
     
-  const isProcessing = isExtractingReceipt || isExtractingBill;
+  const isProcessingImage = isExtractingReceipt || isExtractingBill; // General "busy" state for form inputs
 
   const onFormSubmit = (data: ExpenseFormValues) => {
     onSubmit(data);
@@ -173,30 +271,30 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
               <div className="space-y-2 p-4 border rounded-md shadow-sm">
                 <Label htmlFor="receiptUploadTrigger" className="font-semibold">Receipt Document</Label>
                 <div className="grid grid-cols-1 gap-2">
-                  <Button type="button" id="receiptUploadTrigger" onClick={() => (document.getElementById('receiptUpload') as HTMLInputElement)?.click()} variant="outline" disabled={isProcessing}>
+                  <Button type="button" id="receiptUploadTrigger" onClick={() => (document.getElementById('receiptUpload') as HTMLInputElement)?.click()} variant="outline" disabled={isProcessingImage}>
                     {isExtractingReceipt ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
                     Upload Receipt
                   </Button>
-                  <Input id="receiptUpload" type="file" accept="image/*,.pdf" onChange={(e) => handleFileUpload(e, "receipt")} className="hidden" disabled={isProcessing}/>
+                  <Input id="receiptUpload" type="file" accept="image/*,.pdf" onChange={(e) => handleFileUpload(e, "receipt")} className="hidden" disabled={isProcessingImage}/>
                 </div>
                 {uploadedReceiptFileName && !isExtractingReceipt && <p className="text-sm text-muted-foreground mt-1">File: {uploadedReceiptFileName}</p>}
-                {form.getValues("receiptImageUri") && !uploadedReceiptFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Existing receipt present.</p>}
-                {isExtractingReceipt && <p className="text-sm text-primary flex items-center mt-1"><Wand2 className="h-4 w-4 mr-2 animate-pulse" />Extracting from receipt...</p>}
+                {form.getValues("receiptImageUri") && !uploadedReceiptFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Stored receipt image present.</p>}
+                {isExtractingReceipt && <p className="text-sm text-primary flex items-center mt-1"><Wand2 className="h-4 w-4 mr-2 animate-pulse" />Processing receipt...</p>}
               </div>
 
               {/* Bill Section */}
               <div className="space-y-2 p-4 border rounded-md shadow-sm">
                 <Label htmlFor="billUploadTrigger" className="font-semibold">Bill Document</Label>
                  <div className="grid grid-cols-1 gap-2">
-                  <Button type="button" id="billUploadTrigger" onClick={() => (document.getElementById('billUpload') as HTMLInputElement)?.click()} variant="outline" disabled={isProcessing}>
+                  <Button type="button" id="billUploadTrigger" onClick={() => (document.getElementById('billUpload') as HTMLInputElement)?.click()} variant="outline" disabled={isProcessingImage}>
                     {isExtractingBill ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
                     Upload Bill
                   </Button>
-                   <Input id="billUpload" type="file" accept="image/*,.pdf" onChange={(e) => handleFileUpload(e, "bill")} className="hidden" disabled={isProcessing}/>
+                   <Input id="billUpload" type="file" accept="image/*,.pdf" onChange={(e) => handleFileUpload(e, "bill")} className="hidden" disabled={isProcessingImage}/>
                 </div>
                 {uploadedBillFileName && !isExtractingBill && <p className="text-sm text-muted-foreground mt-1">File: {uploadedBillFileName}</p>}
-                {form.getValues("billImageUri") && !uploadedBillFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Existing bill present.</p>}
-                {isExtractingBill && <p className="text-sm text-primary flex items-center mt-1"><Wand2 className="h-4 w-4 mr-2 animate-pulse" />Extracting from bill...</p>}
+                {form.getValues("billImageUri") && !uploadedBillFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Stored bill image present.</p>}
+                {isExtractingBill && <p className="text-sm text-primary flex items-center mt-1"><Wand2 className="h-4 w-4 mr-2 animate-pulse" />Processing bill...</p>}
               </div>
 
               <FormField
@@ -206,7 +304,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
                   <FormItem>
                     <FormLabel>Date of Service/Purchase</FormLabel>
                     <FormControl>
-                      <DatePicker date={field.value} setDate={field.onChange} disabled={isProcessing} />
+                      <DatePicker date={field.value} setDate={field.onChange} disabled={isProcessingImage} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -219,7 +317,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
                   <FormItem>
                     <FormLabel>Provider/Vendor Name</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., CVS Pharmacy, Dr. Smith" {...field} disabled={isProcessing} />
+                      <Input placeholder="e.g., CVS Pharmacy, Dr. Smith" {...field} disabled={isProcessingImage} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -232,7 +330,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
                   <FormItem>
                     <FormLabel>Patient/Person Name</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., John Doe" {...field} disabled={isProcessing} />
+                      <Input placeholder="e.g., John Doe" {...field} disabled={isProcessingImage} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -245,7 +343,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
                   <FormItem>
                     <FormLabel>Total Cost</FormLabel>
                     <FormControl>
-                      <Input type="number" step="0.01" placeholder="0.00" {...field} disabled={isProcessing} />
+                      <Input type="number" step="0.01" placeholder="0.00" {...field} disabled={isProcessingImage} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -260,7 +358,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
                       <Checkbox
                         checked={field.value}
                         onCheckedChange={field.onChange}
-                        disabled={isProcessing}
+                        disabled={isProcessingImage}
                       />
                     </FormControl>
                     <div className="space-y-1 leading-none">
@@ -274,9 +372,9 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
               />
             </CardContent>
             <CardFooter className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => router.back()} disabled={isProcessing}>Cancel</Button>
-              <Button type="submit" disabled={form.formState.isSubmitting || isProcessing}>
-                {(form.formState.isSubmitting || isProcessing) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              <Button type="button" variant="outline" onClick={() => router.back()} disabled={isProcessingImage || form.formState.isSubmitting}>Cancel</Button>
+              <Button type="submit" disabled={form.formState.isSubmitting || isProcessingImage}>
+                {(form.formState.isSubmitting || isProcessingImage) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 {isEditing ? "Save Changes" : "Add Expense"}
               </Button>
             </CardFooter>
@@ -286,4 +384,3 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     </>
   );
 }
-
