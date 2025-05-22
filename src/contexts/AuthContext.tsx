@@ -5,7 +5,7 @@ import React, { createContext, useState, useEffect, useContext, type ReactNode }
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, type User } from 'firebase/auth';
 import { auth } from '@/lib/firebase'; // Using the initialized auth instance from our firebase lib
 import { useRouter } from 'next/navigation'; // Using next/navigation for App Router
-import { toast } from "@/hooks/use-toast"; // Added for toast notifications
+import { toast } from "@/hooks/use-toast";
 
 interface AuthContextType {
   currentUser: User | null;
@@ -33,10 +33,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-      // Successful sign-in will be handled by onAuthStateChanged
-      // Optionally redirect or show toast here
-      router.push('/dashboard'); // Redirect to dashboard after sign-in
-    } catch (error: any) { // Used 'any' to check error.code
+      // Successful sign-in will be handled by onAuthStateChanged, which updates currentUser.
+      // Other components (like RootPage or AppLayout) will react to currentUser change for redirection.
+      // No explicit router.push here to simplify.
+    } catch (error: any) {
       console.error("Error signing in with Google: ", error);
       if (error.code === 'auth/popup-closed-by-user') {
         toast({
@@ -53,7 +53,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           duration: 5000,
         });
       } else {
-        // Generic error for other cases
         toast({
           title: "Sign-In Failed",
           description: error.message || "An unexpected error occurred. Please try again.",
@@ -67,8 +66,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signOutUser = async () => {
     try {
       await signOut(auth);
-      // Successful sign-out will be handled by onAuthStateChanged
-      // Optionally redirect or show toast here
       router.push('/'); // Redirect to home or a public page after sign-out
     } catch (error: any) {
       console.error("Error signing out: ", error);
