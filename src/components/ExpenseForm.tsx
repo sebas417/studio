@@ -20,12 +20,16 @@ import { Loader2, UploadCloud, Wand2 } from "lucide-react";
 
 export const expenseFormSchema = z.object({
   date: z.date({ required_error: "Date of Service/Purchase is required." }),
-  dateOfPayment: z.date().optional(),
+  dateOfPayment: z.date().optional().nullable(),
   provider: z.string().min(1, "Provider is required."),
   patient: z.string().min(1, "Patient is required."),
   cost: z.coerce.number().positive("Cost must be a positive number."),
   isReimbursedInput: z.boolean().default(false).optional(),
-  receiptImageUri: z.string().optional(),
+  // These will store the File/Blob object for upload, not the URI
+  receiptImageFile: z.custom<File | Blob>().optional(),
+  billImageFile: z.custom<File | Blob>().optional(),
+  // These will hold existing URIs if editing, to avoid re-upload or show current
+  receiptImageUri: z.string().optional(), 
   billImageUri: z.string().optional(),
 });
 
@@ -33,20 +37,18 @@ type ExpenseFormValues = z.infer<typeof expenseFormSchema>;
 
 interface ExpenseFormProps {
   initialData?: Expense | null;
-  onSubmit: (data: ExpenseFormValues) => void;
+  onSubmit: (data: ExpenseFormValues & { receiptImageFile?: File | Blob, billImageFile?: File | Blob }) => void;
   isEditing?: boolean;
 }
 
-// Helper function to parse YYYY-MM-DD string to a local Date object
 const parseDateStringToLocal = (dateStr: string | undefined): Date | undefined => {
   if (dateStr) {
     const parts = dateStr.split('-');
     if (parts.length === 3) {
       const year = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed in JS Date
+      const month = parseInt(parts[1], 10) - 1; 
       const day = parseInt(parts[2], 10);
       if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
-        // This creates a Date object at midnight in the local timezone
         return new Date(year, month, day);
       }
     }
@@ -54,13 +56,12 @@ const parseDateStringToLocal = (dateStr: string | undefined): Date | undefined =
   return undefined; 
 };
 
-
 async function processAndCompressImage(
   file: File, 
   maxWidth: number = 1024, 
   maxHeight: number = 1024, 
   quality: number = 0.7
-): Promise<string> {
+): Promise<Blob> { // Changed to return Promise<Blob>
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -89,11 +90,16 @@ async function processAndCompressImage(
           return reject(new Error('Failed to get canvas context'));
         }
 
-        ctx.filter = 'grayscale(100%)'; // Apply grayscale
+        ctx.filter = 'grayscale(100%)';
         ctx.drawImage(img, 0, 0, width, height);
         
-        const dataUrl = canvas.toDataURL('image/jpeg', quality); // Compress to JPEG
-        resolve(dataUrl);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Canvas toBlob failed'));
+          }
+        }, 'image/jpeg', quality); // Compress to JPEG
       };
       img.onerror = (err) => reject(new Error(`Image load error: ${err}`));
       if (event.target?.result) {
@@ -103,7 +109,7 @@ async function processAndCompressImage(
       }
     };
     reader.onerror = (err) => reject(new Error(`File read error: ${err}`));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(file); // Still need data URL for img.src
   });
 }
 
@@ -122,16 +128,22 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
       ? {
           ...initialData,
           date: parseDateStringToLocal(initialData.date) || new Date(),
-          dateOfPayment: parseDateStringToLocal(initialData.dateOfPayment),
+          dateOfPayment: parseDateStringToLocal(initialData.dateOfPayment) || null,
           isReimbursedInput: initialData.isReimbursed,
+          receiptImageUri: initialData.receiptImageUri, // Keep existing URI
+          billImageUri: initialData.billImageUri,     // Keep existing URI
+          receiptImageFile: undefined, // No new file initially
+          billImageFile: undefined,    // No new file initially
         }
       : {
           date: new Date(),
-          dateOfPayment: undefined,
+          dateOfPayment: null,
           provider: "",
           patient: "",
           cost: 0,
           isReimbursedInput: false,
+          receiptImageFile: undefined,
+          billImageFile: undefined,
           receiptImageUri: undefined,
           billImageUri: undefined,
         },
@@ -144,25 +156,24 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
       form.reset({
         ...initialData,
         date: parseDateStringToLocal(initialData.date) || new Date(),
-        dateOfPayment: parseDateStringToLocal(initialData.dateOfPayment),
+        dateOfPayment: parseDateStringToLocal(initialData.dateOfPayment) || null,
         isReimbursedInput: initialData.isReimbursed,
+        receiptImageUri: initialData.receiptImageUri,
+        billImageUri: initialData.billImageUri,
+        receiptImageFile: undefined,
+        billImageFile: undefined,
       });
-      if(initialData.receiptImageUri) {
-        setUploadedReceiptFileName(initialData.receiptImageUri.startsWith('data:') ? "Stored Receipt" : initialData.receiptImageUri);
-      }
-      if(initialData.billImageUri) {
-        setUploadedBillFileName(initialData.billImageUri.startsWith('data:') ? "Stored Bill" : initialData.billImageUri);
-      }
+      if (initialData.receiptImageUri) setUploadedReceiptFileName("Existing Receipt");
+      if (initialData.billImageUri) setUploadedBillFileName("Existing Bill");
     }
   }, [initialData, form]);
 
   const handleAIDataPopulation = (extracted: ExtractDataOutput, documentType: "Receipt" | "Bill") => {
-    // Populate if AI has value AND field is not dirty (not manually changed by user)
     if (extracted.date && !dirtyFields.date) {
         const parsedDate = parseDateStringToLocal(extracted.date);
         if (parsedDate) form.setValue("date", parsedDate, { shouldValidate: true });
     }
-    if (extracted.dateOfPayment && !dirtyFields.dateOfPayment && documentType === "Receipt") { // Only populate for receipts
+    if (extracted.dateOfPayment && !dirtyFields.dateOfPayment && documentType === "Receipt") {
         const parsedPaymentDate = parseDateStringToLocal(extracted.dateOfPayment);
         if (parsedPaymentDate) form.setValue("dateOfPayment", parsedPaymentDate, { shouldValidate: true });
     }
@@ -178,22 +189,16 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     toast({ title: `Data Extracted from ${documentType}`, description: `Fields populated from ${documentType.toLowerCase()}. Please review.` });
   };
 
-  const processImageForAI = async (dataUri: string, docType: "receipt" | "bill", fileName: string) => {
+  const processImageForAI = async (dataUriForAIScan: string, docType: "receipt" | "bill") => {
     const currentSetter = docType === "receipt" ? setIsExtractingReceipt : setIsExtractingBill;
     
-    if (docType === "receipt") {
-      form.setValue("receiptImageUri", dataUri);
-    } else {
-      form.setValue("billImageUri", dataUri);
-    }
-
     const currentFormValues = form.getValues();
     const isScanWorthSkipping = 
         (dirtyFields.provider || (currentFormValues.provider && currentFormValues.provider !== "")) &&
         (dirtyFields.patient || (currentFormValues.patient && currentFormValues.patient !== "")) &&
         (dirtyFields.cost || (currentFormValues.cost && currentFormValues.cost > 0)) &&
-        (dirtyFields.date) && // Date is required, so it will always be "dirty" or have a value
-        (docType === "receipt" ? (dirtyFields.dateOfPayment || currentFormValues.dateOfPayment) : true); // Only check dateOfPayment for receipts
+        (dirtyFields.date) && 
+        (docType === "receipt" ? (dirtyFields.dateOfPayment || currentFormValues.dateOfPayment) : true);
 
     if (isScanWorthSkipping) {
       toast({
@@ -206,7 +211,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
     }
     
     try {
-      const extracted = await extractData({ photoDataUri: dataUri });
+      const extracted = await extractData({ photoDataUri: dataUriForAIScan });
       handleAIDataPopulation(extracted, docType === "receipt" ? "Receipt" : "Bill");
     } catch (error) {
       console.error(`AI Extraction Error from ${docType}:`, error);
@@ -222,7 +227,6 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
   ) => {
     const file = event.target.files?.[0];
     if (file) {
-      let dataUriForProcessing: string;
       const currentSetterLoading = docType === "receipt" ? setIsExtractingReceipt : setIsExtractingBill;
       const currentFileNameSetter = docType === "receipt" ? setUploadedReceiptFileName : setUploadedBillFileName;
       
@@ -232,40 +236,73 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
       if (file.type.startsWith("image/")) {
         try {
           toast({ title: "Processing Image...", description: "Compressing and preparing your image.", duration: 3000 });
-          dataUriForProcessing = await processAndCompressImage(file);
+          const compressedBlob = await processAndCompressImage(file);
+          if (docType === "receipt") {
+            form.setValue("receiptImageFile", compressedBlob);
+            form.setValue("receiptImageUri", undefined); // Clear old URI if new file is uploaded
+          } else {
+            form.setValue("billImageFile", compressedBlob);
+            form.setValue("billImageUri", undefined); // Clear old URI
+          }
+          
+          // For AI scan, we need a data URI temporarily
+          const dataUriForAIScan = await new Promise<string>((resolve, reject) => {
+             const reader = new FileReader();
+             reader.onloadend = () => resolve(reader.result as string);
+             reader.onerror = reject;
+             reader.readAsDataURL(compressedBlob);
+           });
+          await processImageForAI(dataUriForAIScan, docType);
+
         } catch (compressionError) {
-          console.error("Image compression error:", compressionError);
-          toast({ variant: "destructive", title: "Image Processing Failed", description: "Could not compress the image. Using original file." });
-          dataUriForProcessing = await new Promise<string>((resolve, reject) => {
+          console.error("Image processing error:", compressionError);
+          toast({ variant: "destructive", title: "Image Processing Failed", description: "Could not process the image. Please try again." });
+          currentSetterLoading(false);
+          currentFileNameSetter(null);
+          if (docType === "receipt") form.setValue("receiptImageFile", undefined); else form.setValue("billImageFile", undefined);
+          return;
+        }
+      } else if (file.type === "application/pdf") {
+        // For PDFs, store the file directly, AI scan with its original data URI
+         if (docType === "receipt") {
+            form.setValue("receiptImageFile", file);
+            form.setValue("receiptImageUri", undefined);
+         } else {
+            form.setValue("billImageFile", file);
+            form.setValue("billImageUri", undefined);
+         }
+         const dataUriForAIScan = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result as string);
             reader.onerror = reject;
             reader.readAsDataURL(file);
           });
-        }
-      } else if (file.type === "application/pdf") {
-        dataUriForProcessing = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
+         await processImageForAI(dataUriForAIScan, docType);
       } else {
         toast({ variant: "destructive", title: "Unsupported File Type", description: "Please upload an image (JPG, PNG, etc.) or a PDF." });
         currentSetterLoading(false);
         currentFileNameSetter(null); 
-        if (docType === "receipt") form.setValue("receiptImageUri", undefined); else form.setValue("billImageUri", undefined);
+        if (docType === "receipt") form.setValue("receiptImageFile", undefined); else form.setValue("billImageFile", undefined);
         return;
       }
-      
-      await processImageForAI(dataUriForProcessing, docType, file.name);
     }
   };
     
   const isProcessingImage = isExtractingReceipt || isExtractingBill; 
 
   const onFormSubmit = (data: ExpenseFormValues) => {
-    onSubmit(data);
+    // onSubmit expects data that includes File/Blob for new uploads
+    // and keeps existing URIs if no new file is selected.
+    const submissionData = {
+      ...data,
+      // Make sure to pass the File/Blob if it exists
+      receiptImageFile: data.receiptImageFile,
+      billImageFile: data.billImageFile,
+      // If no new file, keep the URI from initialData (already in form values if editing)
+      receiptImageUri: data.receiptImageFile ? undefined : data.receiptImageUri,
+      billImageUri: data.billImageFile ? undefined : data.billImageUri,
+    };
+    onSubmit(submissionData);
   };
 
   return (
@@ -280,7 +317,6 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onFormSubmit)}>
             <CardContent className="space-y-6">
-              {/* Receipt Section */}
               <div className="space-y-2 p-4 border rounded-md shadow-sm">
                 <Label htmlFor="receiptUploadTrigger" className="font-semibold">Receipt Document</Label>
                 <div className="grid grid-cols-1 gap-2">
@@ -291,11 +327,10 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
                   <Input id="receiptUpload" type="file" accept="image/*,.pdf" onChange={(e) => handleFileUpload(e, "receipt")} className="hidden" disabled={isProcessingImage}/>
                 </div>
                 {uploadedReceiptFileName && !isExtractingReceipt && <p className="text-sm text-muted-foreground mt-1">File: {uploadedReceiptFileName}</p>}
-                {form.getValues("receiptImageUri") && !uploadedReceiptFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Stored receipt image present.</p>}
+                {form.getValues("receiptImageUri") && !uploadedReceiptFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Current: <a href={form.getValues("receiptImageUri")} target="_blank" rel="noopener noreferrer" className="underline">View Stored Receipt</a></p>}
                 {isExtractingReceipt && <p className="text-sm text-primary flex items-center mt-1"><Wand2 className="h-4 w-4 mr-2 animate-pulse" />Processing receipt...</p>}
               </div>
 
-              {/* Bill Section */}
               <div className="space-y-2 p-4 border rounded-md shadow-sm">
                 <Label htmlFor="billUploadTrigger" className="font-semibold">Bill Document</Label>
                  <div className="grid grid-cols-1 gap-2">
@@ -306,7 +341,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
                    <Input id="billUpload" type="file" accept="image/*,.pdf" onChange={(e) => handleFileUpload(e, "bill")} className="hidden" disabled={isProcessingImage}/>
                 </div>
                 {uploadedBillFileName && !isExtractingBill && <p className="text-sm text-muted-foreground mt-1">File: {uploadedBillFileName}</p>}
-                {form.getValues("billImageUri") && !uploadedBillFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Stored bill image present.</p>}
+                {form.getValues("billImageUri") && !uploadedBillFileName && isEditing && <p className="text-sm text-muted-foreground mt-1">Current: <a href={form.getValues("billImageUri")} target="_blank" rel="noopener noreferrer" className="underline">View Stored Bill</a></p>}
                 {isExtractingBill && <p className="text-sm text-primary flex items-center mt-1"><Wand2 className="h-4 w-4 mr-2 animate-pulse" />Processing bill...</p>}
               </div>
 
@@ -330,7 +365,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
                   <FormItem>
                     <FormLabel>Date of Payment (from Receipt)</FormLabel>
                     <FormControl>
-                      <DatePicker date={field.value} setDate={field.onChange} disabled={isProcessingImage} />
+                       <DatePicker date={field.value || undefined} setDate={(date) => field.onChange(date || null)} disabled={isProcessingImage} />
                     </FormControl>
                     <FormDescription>Optional. The date payment was made, if shown on the receipt.</FormDescription>
                     <FormMessage />

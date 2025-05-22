@@ -1,3 +1,4 @@
+
 "use client";
 
 import { ExpenseForm, type expenseFormSchema } from "@/components/ExpenseForm";
@@ -8,15 +9,22 @@ import type { z } from "zod";
 
 export default function AddExpensePage() {
   const router = useRouter();
-  const { addExpense } = useExpenses();
+  const { addExpense, isLoading } = useExpenses(); // Add isLoading
   const { toast } = useToast();
 
-  const handleSubmit = (data: z.infer<typeof expenseFormSchema>) => {
-    addExpense(data);
-    toast({
-      title: "Expense Added",
-      description: `${data.provider} for $${data.cost.toFixed(2)} has been added.`,
+  const handleSubmit = async (data: z.infer<typeof expenseFormSchema>) => {
+    // The data from expenseFormSchema now includes receiptImageFile and billImageFile
+    await addExpense({
+      date: data.date,
+      dateOfPayment: data.dateOfPayment,
+      provider: data.provider,
+      patient: data.patient,
+      cost: data.cost,
+      isReimbursedInput: data.isReimbursedInput,
+      receiptImageFile: data.receiptImageFile, // Pass the file
+      billImageFile: data.billImageFile,     // Pass the file
     });
+    // Toasting is now handled within addExpense hook after successful Firestore operation
     router.push("/expenses");
   };
 
