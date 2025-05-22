@@ -1,7 +1,8 @@
+"use client";
+
 import * as React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation'; // Corrected: usePathname must be client component
-"use client"; // Required for usePathname and other client-side hooks
+import { usePathname } from 'next/navigation';
 
 import { cn } from '@/lib/utils';
 import { mainNav, siteConfig } from '@/config/site';
@@ -17,7 +18,7 @@ import {
   SidebarFooter,
   SidebarTrigger,
   useSidebar,
-} from '@/components/ui/sidebar'; // Assuming sidebar.tsx is in ui
+} from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
