@@ -21,10 +21,10 @@ export function useExpenses() {
       }
     } catch (error) {
       console.error("Failed to load expenses from localStorage:", error);
-      if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+      if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
         toast({
           variant: "destructive",
-          title: "Storage Full",
+          title: "Storage Full During Load",
           description: "Could not load all expense data. Browser storage is full.",
         });
       } else {
@@ -44,19 +44,19 @@ export function useExpenses() {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
       } catch (error) {
-        console.error("Failed to save expenses to localStorage:", error);
-        if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+        console.error("Failed to save expenses to localStorage:", error); // This log will be picked up by Next.js overlay
+        if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
           toast({
             variant: "destructive",
             title: "Storage Full",
-            description: "Could not save image data as browser storage is full. Other expense details are saved. Please consider clearing some site data or reducing image uploads.",
-            duration: 9000, // Longer duration for important messages
+            description: "Could not save image data as browser storage is full. Attempting to save other expense details. Please consider clearing some site data or reducing image uploads.",
+            duration: 9000, 
           });
-          // Attempt to save without images if stringify itself didn't fail before setItem
+          // Attempt to save without images
           try {
             const expensesWithoutImages = expenses.map(exp => {
               const { receiptImageUri, billImageUri, ...rest } = exp;
-              return rest;
+              return rest; // isReimbursed and other fields are preserved in ...rest
             });
             localStorage.setItem(STORAGE_KEY, JSON.stringify(expensesWithoutImages));
              toast({
@@ -68,7 +68,7 @@ export function useExpenses() {
             toast({
               variant: "destructive",
               title: "Save Failed",
-              description: "Could not save any expense data due to critical storage issues.",
+              description: "Could not save any expense data due to critical storage issues. Even the fallback save without images failed.",
             });
           }
         } else {
@@ -98,7 +98,7 @@ export function useExpenses() {
     });
   }, []);
 
-  const updateExpense = useCallback((id: string, data: Omit<Expense, 'id' | 'date'> & { date: Date; isReimbursedInput?: boolean }) => {
+  const updateExpense = useCallback((id: string, data: Omit<Expense, 'id' | 'date'> & { date: Date; isReimbursedInput?: boolean; receiptImageUri?: string; billImageUri?: string }) => {
     setExpenses((prevExpenses) =>
       prevExpenses.map((exp) =>
         exp.id === id ? {
@@ -106,9 +106,9 @@ export function useExpenses() {
           ...data,
           date: data.date.toISOString().split('T')[0],
           isReimbursed: data.isReimbursedInput !== undefined ? data.isReimbursedInput : (data as any).isReimbursed !== undefined ? (data as any).isReimbursed : exp.isReimbursed,
-          // Ensure existing billImageUri is preserved if not in `data`
-          billImageUri: data.billImageUri !== undefined ? data.billImageUri : exp.billImageUri,
+          // Ensure existing image URIs are preserved if not explicitly overwritten by `data`
           receiptImageUri: data.receiptImageUri !== undefined ? data.receiptImageUri : exp.receiptImageUri,
+          billImageUri: data.billImageUri !== undefined ? data.billImageUri : exp.billImageUri,
         } : exp
       ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     );
