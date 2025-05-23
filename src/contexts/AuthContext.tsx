@@ -19,34 +19,25 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const router = useRouter(); // router can be used if needed for navigation after auth actions
+  const router = useRouter(); 
 
   useEffect(() => {
-    console.log("[AuthContext] Setting up onAuthStateChanged listener.");
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        console.log("[AuthContext] onAuthStateChanged: User is signed in.", user.uid, user.email);
-      } else {
-        console.log("[AuthContext] onAuthStateChanged: User is signed out.");
-      }
       setCurrentUser(user);
       setLoading(false);
     });
     return () => {
-      console.log("[AuthContext] Cleaning up onAuthStateChanged listener.");
       unsubscribe();
     }
   }, []);
 
   const signInWithGoogle = async () => {
-    console.log("[AuthContext] signInWithGoogle function CALLED.");
-
     if (!auth) {
-      console.error("[AuthContext] Firebase auth instance from '@/lib/firebase' is not available. Cannot sign in.");
+      console.error("[AuthContext] Firebase auth instance from '@/lib/firebase' is not available.");
       toast({
         variant: 'destructive',
         title: "Authentication Service Error",
-        description: "The Firebase authentication service is not properly initialized. Please contact support or try again later.",
+        description: "The authentication service is currently unavailable. Please try again later.",
         duration: 7000,
       });
       return;
@@ -55,40 +46,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const provider = new GoogleAuthProvider();
     provider.addScope('profile');
     provider.addScope('email');
-    // Prompt for account selection to help with stale cookie/session issues
     provider.setCustomParameters({
       prompt: 'select_account'
     });
-    console.log("[AuthContext] Attempting to sign in with Google using provider:", provider);
-
+    
     try {
-      const result = await signInWithPopup(auth, provider);
-      console.log("[AuthContext] Google Sign-In successful. UserCredential Result:", result);
+      await signInWithPopup(auth, provider);
       // Successful sign-in will be handled by onAuthStateChanged
+      // User will be redirected by logic in page.tsx or layout.tsx based on currentUser state
     } catch (error: any) {
-      console.error("[AuthContext] Error during signInWithPopup: ", error);
-      console.error("[AuthContext] Error Code:", error.code);
-      console.error("[AuthContext] Error Message:", error.message);
+      console.error("[AuthContext] Error during signInWithPopup: ", error.code, error.message);
       
-      if (error.code === 'auth/popup-closed-by-user') {
+      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
         toast({
           variant: 'destructive',
-          title: "Sign-In Popup Closed",
-          description: "The Google Sign-In popup closed before completion. This can happen due to browser settings (e.g., strict privacy, third-party cookie blocking), or if you manually closed it. If persistent, try clearing browser cookies for Google and this site, or check your Google Cloud OAuth consent screen settings.",
-          duration: 10000,
-        });
-      } else if (error.code === 'auth/cancelled-popup-request') {
-         toast({
-          variant: 'destructive',
-          title: "Sign-In Request Cancelled",
-          description: "Multiple sign-in popups may have been opened or the request was cancelled. This can also be related to browser settings or OAuth consent screen issues. Please try again.",
+          title: "Sign-In Interrupted",
+          description: "The sign-in process didn't complete. This can sometimes happen due to browser settings or if the window was closed prematurely. Please try again. If the issue persists, try clearing browser cookies.",
           duration: 10000,
         });
       } else if (error.code === 'auth/unauthorized-domain') {
-        toast({
+        // This error is primarily for the developer during setup.
+        // A user ideally shouldn't see this if the app is correctly configured.
+        // We'll show a generic error to the user for other cases.
+         toast({
           variant: 'destructive',
-          title: "Domain Not Authorized for Sign-In",
-          description: "This domain is not authorized for Google Sign-In. Please check Firebase console settings under Authentication > Settings > Authorized domains. Ensure your current development URL (including any specific port) is listed.",
+          title: "Sign-In Configuration Issue",
+          description: "There seems to be a configuration problem with sign-in. Please contact support if this issue persists.",
           duration: 10000,
         });
       }
@@ -96,7 +79,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         toast({
           variant: 'destructive',
           title: "Sign-In Failed",
-          description: `Error: ${error.message || "An unexpected error occurred. Please try again."}`,
+          description: "An unexpected error occurred while trying to sign you in. Please try again.",
           duration: 7000,
         });
       }
@@ -104,17 +87,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOutUser = async () => {
-    console.log("[AuthContext] Attempting to sign out current user:", currentUser?.uid);
     try {
       await signOut(auth);
-      console.log("[AuthContext] Sign-out successful via signOutUser function.");
-      // router.push('/'); // Optional: redirect to home page after sign out
+      // Navigation to home or login page can be handled by the layout/page components
+      // observing the currentUser state change.
+      // router.push('/'); 
     } catch (error: any) {
       console.error("[AuthContext] Error signing out: ", error);
       toast({
         variant: 'destructive',
         title: "Sign-Out Failed",
-        description: error.message || "An unexpected error occurred during sign-out.",
+        description: "An unexpected error occurred during sign-out. Please try again.",
       });
     }
   };
@@ -136,4 +119,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-
