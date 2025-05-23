@@ -19,7 +19,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
+  const router = useRouter(); // router can be used if needed for navigation after auth actions
 
   useEffect(() => {
     console.log("[AuthContext] Setting up onAuthStateChanged listener.");
@@ -69,24 +69,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       if (error.code === 'auth/popup-closed-by-user') {
         toast({
-          title: "Sign-In Cancelled by User",
-          description: "The Google Sign-In popup was closed. Please try again. Ensure popups are allowed and check if your current development domain is authorized in Firebase.",
-          variant: "destructive", // Changed to destructive for more visibility
-          duration: 7000,
+          title: "Sign-In Popup Closed Unexpectedly",
+          description: "The Google Sign-In popup closed before completion. This might be due to: 1. Browser privacy settings (e.g., blocking third-party cookies). 2. Issues with your Google Cloud project's OAuth consent screen. Please check these and retry.",
+          variant: "destructive",
+          duration: 10000, // Longer duration for more complex message
         });
       } else if (error.code === 'auth/cancelled-popup-request') {
          toast({
           title: "Sign-In Request Cancelled",
-          description: "Multiple sign-in popups may have been opened or the request was cancelled. Please try again.",
-          variant: "destructive", // Changed to destructive
-          duration: 7000,
+          description: "Multiple sign-in popups may have been opened or the request was cancelled. This can also be related to browser settings or OAuth consent screen issues. Please try again.",
+          variant: "destructive",
+          duration: 10000,
         });
       } else if (error.code === 'auth/unauthorized-domain') {
         toast({
           title: "Domain Not Authorized for Sign-In",
           description: "This domain is not authorized for Google Sign-In. Please check Firebase console settings under Authentication > Settings > Authorized domains. Ensure your current development URL is listed.",
           variant: "destructive",
-          duration: 10000, // Longer duration
+          duration: 10000,
         });
       }
       else {
@@ -105,6 +105,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       await signOut(auth);
       console.log("[AuthContext] Sign-out successful via signOutUser function.");
+      // router.push('/'); // Optional: redirect to home page after sign out
     } catch (error: any) {
       console.error("[AuthContext] Error signing out: ", error);
       toast({
