@@ -4,7 +4,7 @@
 import React, { createContext, useState, useEffect, useContext, type ReactNode } from 'react';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, type User } from 'firebase/auth';
 import { auth } from '@/lib/firebase'; // Using the initialized auth instance from our firebase lib
-import { useRouter } from 'next/navigation'; 
+import { useRouter } from 'next/navigation';
 import { toast } from "@/hooks/use-toast";
 
 interface AuthContextType {
@@ -25,7 +25,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     console.log("[AuthContext] Setting up onAuthStateChanged listener.");
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        console.log("[AuthContext] onAuthStateChanged: User is signed in.", user.uid);
+        console.log("[AuthContext] onAuthStateChanged: User is signed in.", user.uid, user.email);
       } else {
         console.log("[AuthContext] onAuthStateChanged: User is signed out.");
       }
@@ -39,7 +39,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signInWithGoogle = async () => {
-    // Defensive check for the auth instance
+    console.log("[AuthContext] signInWithGoogle function CALLED."); // New log
+
     if (!auth) {
       console.error("[AuthContext] Firebase auth instance from '@/lib/firebase' is not available. Cannot sign in.");
       toast({
@@ -52,11 +53,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const provider = new GoogleAuthProvider();
+    provider.addScope('profile'); // Explicitly add common scopes
+    provider.addScope('email');   // Explicitly add common scopes
     console.log("[AuthContext] Attempting to sign in with Google using provider:", provider);
+
     try {
       const result = await signInWithPopup(auth, provider);
       console.log("[AuthContext] Google Sign-In successful. UserCredential Result:", result);
       // Successful sign-in will be handled by onAuthStateChanged
+      // No explicit navigation here to avoid potential race conditions
     } catch (error: any) {
       console.error("[AuthContext] Error during signInWithPopup: ", error);
       console.error("[AuthContext] Error Code:", error.code);
@@ -64,24 +69,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       if (error.code === 'auth/popup-closed-by-user') {
         toast({
-          title: "Sign-In Cancelled",
-          description: "The Google Sign-In popup was closed before completing. Please try again.",
-          variant: "default",
-          duration: 5000,
+          title: "Sign-In Cancelled by User",
+          description: "The Google Sign-In popup was closed. Please try again. Ensure popups are allowed and check if your current development domain is authorized in Firebase.",
+          variant: "destructive", // Changed to destructive for more visibility
+          duration: 7000,
         });
       } else if (error.code === 'auth/cancelled-popup-request') {
          toast({
-          title: "Sign-In Cancelled",
+          title: "Sign-In Request Cancelled",
           description: "Multiple sign-in popups may have been opened or the request was cancelled. Please try again.",
-          variant: "default",
-          duration: 5000,
+          variant: "destructive", // Changed to destructive
+          duration: 7000,
         });
       } else if (error.code === 'auth/unauthorized-domain') {
         toast({
-          title: "Domain Not Authorized",
-          description: "This domain is not authorized for Google Sign-In. Please check Firebase console settings.",
+          title: "Domain Not Authorized for Sign-In",
+          description: "This domain is not authorized for Google Sign-In. Please check Firebase console settings under Authentication > Settings > Authorized domains. Ensure your current development URL is listed.",
           variant: "destructive",
-          duration: 7000,
+          duration: 10000, // Longer duration
         });
       }
       else {
@@ -100,8 +105,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       await signOut(auth);
       console.log("[AuthContext] Sign-out successful via signOutUser function.");
-      // onAuthStateChanged will set currentUser to null
-      // router.push('/'); // Let onAuthStateChanged and page/layout components handle redirection
     } catch (error: any) {
       console.error("[AuthContext] Error signing out: ", error);
       toast({
@@ -129,3 +132,4 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+

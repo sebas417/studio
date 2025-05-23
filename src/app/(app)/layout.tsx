@@ -1,9 +1,9 @@
 
-"use client";
+"use client"; // Required for usePathname and other client-side hooks
 
 import * as React from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation'; // Added useRouter
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { mainNav, siteConfig } from '@/config/site';
 import { AppLogo } from '@/components/AppLogo';
@@ -30,13 +30,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LogIn, LogOut } from 'lucide-react'; // Added LogIn
-import { useAuth } from '@/contexts/AuthContext'; // Added
-import { Skeleton } from '@/components/ui/skeleton'; // Added
+import { LogIn, LogOut } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Skeleton } from '@/components/ui/skeleton';
 
 function UserNav() {
-  const { currentUser, loading, signInWithGoogle, signOutUser } = useAuth(); // Added
-  const router = useRouter(); // Added
+  const { currentUser, loading, signInWithGoogle, signOutUser } = useAuth();
+  const router = useRouter();
+
+  const handleSignIn = () => {
+    console.log("[UserNav] Sign in button CLICKED. Calling signInWithGoogle..."); // New log
+    signInWithGoogle();
+  };
 
   if (loading) {
     return (
@@ -49,7 +54,7 @@ function UserNav() {
 
   if (!currentUser) {
     return (
-      <Button onClick={signInWithGoogle} variant="outline">
+      <Button onClick={handleSignIn} variant="outline">
         <LogIn className="mr-2 h-4 w-4" />
         Sign in with Google
       </Button>
@@ -61,10 +66,10 @@ function UserNav() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-8 w-8 rounded-full">
           <Avatar className="h-8 w-8">
-            <AvatarImage 
-              src={currentUser.photoURL || `https://placehold.co/40x40.png?text=${currentUser.displayName?.charAt(0) || currentUser.email?.charAt(0) || 'U'}`} 
-              alt={currentUser.displayName || "User Avatar"} 
-              data-ai-hint="user avatar" 
+            <AvatarImage
+              src={currentUser.photoURL || `https://placehold.co/40x40.png?text=${currentUser.displayName?.charAt(0) || currentUser.email?.charAt(0) || 'U'}`}
+              alt={currentUser.displayName || "User Avatar"}
+              data-ai-hint="user avatar"
             />
             <AvatarFallback>{currentUser.displayName?.charAt(0) || currentUser.email?.charAt(0) || 'U'}</AvatarFallback>
           </Avatar>
@@ -119,10 +124,6 @@ function MainSidebarContent() {
       </>
     )
   }
-  
-  // If not logged in, you might want to show a different sidebar or hide it
-  // For now, it will show, but links might not work as expected or lead to login prompts (future enhancement)
-  // if (!currentUser && !loading) return null; // Or some placeholder
 
   return (
     <>
@@ -139,7 +140,7 @@ function MainSidebarContent() {
                     isActive={pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))}
                     tooltip={isCollapsed ? item.title : undefined}
                     className="justify-start"
-                    disabled={!currentUser && !loading && item.href !== '/'} // Disable if not logged in, adjust as needed
+                    disabled={!currentUser && !loading && item.href !== '/'} 
                   >
                     <item.icon className="h-5 w-5" />
                     {!isCollapsed && <span>{item.title}</span>}
@@ -163,29 +164,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   React.useEffect(() => {
-    if (!loading && !currentUser && pathname !== '/') { // Assuming '/' is a public page or redirects to login
-      // If there's no dedicated login page, signing in will happen via UserNav
-      // This check is more for if you had protected routes that shouldn't be accessible at all without login
-      // router.push('/'); // Or a dedicated login page e.g. /login
+    if (!loading && !currentUser && pathname !== '/') {
+      // The UserNav component handles the sign-in prompt.
+      // If the user is not logged in and not on the public landing page,
+      // the main content area will show a "Please sign in" message.
     }
   }, [loading, currentUser, router, pathname]);
 
   if (loading) {
      return (
       <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" /> 
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
       </div>
     );
   }
-  
-  // Basic protection: if not loading and no user, and not on a public page, redirect or show minimal layout
-  // For now, we allow access, and UserNav handles sign-in prompt
-  // A more robust solution would involve route guarding.
 
   return (
     <SidebarProvider defaultOpen={true}>
       <div className="flex min-h-screen">
-        {currentUser && ( // Only show sidebar if user is logged in
+        {currentUser && ( 
           <Sidebar collapsible="icon" className="border-r border-sidebar-border">
             <MainSidebarContent />
           </Sidebar>
@@ -193,9 +190,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex flex-1 flex-col">
           <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background/80 backdrop-blur-sm px-6">
             <div className="flex items-center gap-2">
-               {currentUser && <SidebarTrigger className="md:hidden" />} {/* Hamburger for mobile only if logged in */}
+               {currentUser && <SidebarTrigger className="md:hidden" />}
                <h1 className="text-xl font-semibold tracking-tight">
-                {/* This could be dynamic based on page */}
                </h1>
             </div>
             <UserNav />
@@ -205,7 +201,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="flex flex-col items-center justify-center h-full text-center">
                 <AppLogo />
                 <p className="mt-4 text-lg text-muted-foreground">Please sign in to continue.</p>
-                {/* The UserNav in the header already provides the sign-in button */}
+                {/* UserNav in the header provides the sign-in button */}
               </div>
             )}
           </main>
@@ -215,7 +211,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Helper for loading spinner, assuming Loader2 is available
+// Helper for loading spinner
 const Loader2 = ({ className, ...props }: React.ComponentProps<typeof LogIn>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
