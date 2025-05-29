@@ -26,7 +26,7 @@ const ExtractDataOutputSchema = z.object({
   provider: z.string().describe('The name of the provider.'),
   patient: z.string().describe('The name of the patient.'),
   cost: z.number().describe('The total cost on the receipt or bill.'),
-  dateOfPayment: z.string().optional().describe('The date of payment from the receipt, if explicitly present, formatted strictly as YYYY-MM-DD. This might be different from the date of service and may not always be available.'),
+  dateOfPayment: z.string().describe('The date of payment, formatted strictly as YYYY-MM-DD. For receipts, if an explicit payment date is found, use it; otherwise, use the Date of Service/Transaction. For bills or other documents where a payment date is not distinct, use the Date of Service/Transaction.'),
 });
 export type ExtractDataOutput = z.infer<typeof ExtractDataOutputSchema>;
 
@@ -47,7 +47,11 @@ following information from the document:
 - Provider: The name of the provider.
 - Patient: The name of the patient.
 - Cost: The total cost on the receipt or bill.
-- Date of Payment (from Receipt): If the document is clearly a receipt and explicitly states a "Date of Payment" or similar (which might be the same as or different from the Date of Service/Transaction), extract this date. Format it strictly as YYYY-MM-DD. If no clear payment date is found, this field can be omitted.
+- Date of Payment:
+  - If the document is clearly a receipt and explicitly states a "Date of Payment" or similar (which might be the same as or different from the Date of Service/Transaction), extract this date.
+  - If the document is a receipt but no explicit "Date of Payment" is found, use the value you determined for "Date of Service/Transaction" as the "Date of Payment".
+  - If the document is primarily a bill and not a payment receipt, use the value you determined for "Date of Service/Transaction" as the "Date of Payment".
+  Format this date strictly as YYYY-MM-DD.
 
 Here is the document:
 
