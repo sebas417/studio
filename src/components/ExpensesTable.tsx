@@ -75,9 +75,14 @@ export function ExpensesTable({ expenses }: ExpensesTableProps) {
 
   const formatDate = (dateString: string) => {
     try {
-      return format(new Date(dateString), "MMM dd, yyyy");
+      // Append T00:00:00 to ensure the date is parsed as local time, not UTC.
+      // This prevents the date from being off by one day due to timezone conversion.
+      return format(new Date(`${dateString}T00:00:00`), "MMM dd, yyyy");
     } catch (e) {
-      return dateString; // Fallback if date is invalid
+      // Fallback for invalid date strings, though this should ideally not happen
+      // if data is consistently stored as YYYY-MM-DD.
+      console.error("Invalid date string for formatting:", dateString, e);
+      return dateString; 
     }
   };
 
@@ -184,5 +189,7 @@ export function ExpensesTable({ expenses }: ExpensesTableProps) {
 const buttonVariants = ({ variant }: { variant: "destructive" | "outline" | "default" | "secondary" | "ghost" | "link" }) => {
   if (variant === "destructive") return "bg-destructive text-destructive-foreground hover:bg-destructive/90";
   if (variant === "outline") return "border border-input bg-background hover:bg-accent hover:text-accent-foreground";
-  return "";
+  // Add other variants if needed, or ensure this helper is robust or exported from your ui/button
+  return ""; 
 };
+
