@@ -25,10 +25,8 @@ export const expenseFormSchema = z.object({
   patient: z.string().min(1, "Patient is required."),
   cost: z.coerce.number().positive("Cost must be a positive number."),
   isReimbursedInput: z.boolean().default(false).optional(),
-  // These will store the File/Blob object for upload, not the URI
   receiptImageFile: z.custom<File | Blob>().optional(),
   billImageFile: z.custom<File | Blob>().optional(),
-  // These will hold existing URIs if editing, to avoid re-upload or show current
   receiptImageUri: z.string().optional(), 
   billImageUri: z.string().optional(),
 });
@@ -61,7 +59,7 @@ async function processAndCompressImage(
   maxWidth: number = 1024, 
   maxHeight: number = 1024, 
   quality: number = 0.7
-): Promise<Blob> { // Changed to return Promise<Blob>
+): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -99,7 +97,7 @@ async function processAndCompressImage(
           } else {
             reject(new Error('Canvas toBlob failed'));
           }
-        }, 'image/jpeg', quality); // Compress to JPEG
+        }, 'image/jpeg', quality);
       };
       img.onerror = (err) => reject(new Error(`Image load error: ${err}`));
       if (event.target?.result) {
@@ -109,7 +107,7 @@ async function processAndCompressImage(
       }
     };
     reader.onerror = (err) => reject(new Error(`File read error: ${err}`));
-    reader.readAsDataURL(file); // Still need data URL for img.src
+    reader.readAsDataURL(file);
   });
 }
 
@@ -130,10 +128,10 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
           date: parseDateStringToLocal(initialData.date) || new Date(),
           dateOfPayment: parseDateStringToLocal(initialData.dateOfPayment) || null,
           isReimbursedInput: initialData.isReimbursed,
-          receiptImageUri: initialData.receiptImageUri, // Keep existing URI
-          billImageUri: initialData.billImageUri,     // Keep existing URI
-          receiptImageFile: undefined, // No new file initially
-          billImageFile: undefined,    // No new file initially
+          receiptImageUri: initialData.receiptImageUri,
+          billImageUri: initialData.billImageUri,
+          receiptImageFile: undefined,
+          billImageFile: undefined,
         }
       : {
           date: new Date(),
@@ -233,26 +231,21 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
       currentSetterLoading(true); 
       currentFileNameSetter(file.name);
 
+      let fileForUpload: File | Blob = file;
+      let dataUriForAIScan: string;
+
       if (file.type.startsWith("image/")) {
         try {
           toast({ title: "Processing Image...", description: "Compressing and preparing your image.", duration: 3000 });
           const compressedBlob = await processAndCompressImage(file);
-          if (docType === "receipt") {
-            form.setValue("receiptImageFile", compressedBlob);
-            form.setValue("receiptImageUri", undefined); // Clear old URI if new file is uploaded
-          } else {
-            form.setValue("billImageFile", compressedBlob);
-            form.setValue("billImageUri", undefined); // Clear old URI
-          }
+          fileForUpload = compressedBlob;
           
-          // For AI scan, we need a data URI temporarily
-          const dataUriForAIScan = await new Promise<string>((resolve, reject) => {
+          dataUriForAIScan = await new Promise<string>((resolve, reject) => {
              const reader = new FileReader();
              reader.onloadend = () => resolve(reader.result as string);
              reader.onerror = reject;
-             reader.readAsDataURL(compressedBlob);
+             reader.readAsDataURL(compressedBlob); // Use compressed blob for AI scan URI
            });
-          await processImageForAI(dataUriForAIScan, docType);
 
         } catch (compressionError) {
           console.error("Image processing error:", compressionError);
@@ -263,21 +256,14 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
           return;
         }
       } else if (file.type === "application/pdf") {
-        // For PDFs, store the file directly, AI scan with its original data URI
-         if (docType === "receipt") {
-            form.setValue("receiptImageFile", file);
-            form.setValue("receiptImageUri", undefined);
-         } else {
-            form.setValue("billImageFile", file);
-            form.setValue("billImageUri", undefined);
-         }
-         const dataUriForAIScan = await new Promise<string>((resolve, reject) => {
+         // For PDFs, use the original file for upload and generate data URI from it for AI scan
+         fileForUpload = file;
+         dataUriForAIScan = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result as string);
             reader.onerror = reject;
             reader.readAsDataURL(file);
           });
-         await processImageForAI(dataUriForAIScan, docType);
       } else {
         toast({ variant: "destructive", title: "Unsupported File Type", description: "Please upload an image (JPG, PNG, etc.) or a PDF." });
         currentSetterLoading(false);
@@ -285,20 +271,27 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
         if (docType === "receipt") form.setValue("receiptImageFile", undefined); else form.setValue("billImageFile", undefined);
         return;
       }
+
+      // Set the file (original PDF or compressed image Blob) for upload
+      if (docType === "receipt") {
+        form.setValue("receiptImageFile", fileForUpload);
+        form.setValue("receiptImageUri", undefined); // Clear old URI if new file is uploaded
+      } else {
+        form.setValue("billImageFile", fileForUpload);
+        form.setValue("billImageUri", undefined); // Clear old URI
+      }
+      
+      await processImageForAI(dataUriForAIScan, docType);
     }
   };
     
   const isProcessingImage = isExtractingReceipt || isExtractingBill; 
 
   const onFormSubmit = (data: ExpenseFormValues) => {
-    // onSubmit expects data that includes File/Blob for new uploads
-    // and keeps existing URIs if no new file is selected.
     const submissionData = {
       ...data,
-      // Make sure to pass the File/Blob if it exists
       receiptImageFile: data.receiptImageFile,
       billImageFile: data.billImageFile,
-      // If no new file, keep the URI from initialData (already in form values if editing)
       receiptImageUri: data.receiptImageFile ? undefined : data.receiptImageUri,
       billImageUri: data.billImageFile ? undefined : data.billImageUri,
     };
@@ -311,14 +304,14 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
         <CardHeader>
           <CardTitle>{isEditing ? "Edit Expense" : "Add New Expense"}</CardTitle>
           <CardDescription>
-            {isEditing ? "Update the details of your expense." : "Fill in the details of your new expense. You can upload a receipt and/or a bill to automatically extract information."}
+            {isEditing ? "Update the details of your expense." : "Fill in the details of your new expense. You can upload a receipt (image/PDF) and/or a bill (image/PDF) to automatically extract information."}
           </CardDescription>
         </CardHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onFormSubmit)}>
             <CardContent className="space-y-6">
               <div className="space-y-2 p-4 border rounded-md shadow-sm">
-                <Label htmlFor="receiptUploadTrigger" className="font-semibold">Receipt Document</Label>
+                <Label htmlFor="receiptUploadTrigger" className="font-semibold">Receipt Document (Image or PDF)</Label>
                 <div className="grid grid-cols-1 gap-2">
                   <Button type="button" id="receiptUploadTrigger" onClick={() => (document.getElementById('receiptUpload') as HTMLInputElement)?.click()} variant="outline" disabled={isProcessingImage}>
                     {isExtractingReceipt ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
@@ -332,7 +325,7 @@ export function ExpenseForm({ initialData, onSubmit, isEditing = false }: Expens
               </div>
 
               <div className="space-y-2 p-4 border rounded-md shadow-sm">
-                <Label htmlFor="billUploadTrigger" className="font-semibold">Bill Document</Label>
+                <Label htmlFor="billUploadTrigger" className="font-semibold">Bill Document (Image or PDF)</Label>
                  <div className="grid grid-cols-1 gap-2">
                   <Button type="button" id="billUploadTrigger" onClick={() => (document.getElementById('billUpload') as HTMLInputElement)?.click()} variant="outline" disabled={isProcessingImage}>
                     {isExtractingBill ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UploadCloud className="h-4 w-4 mr-2" />}
