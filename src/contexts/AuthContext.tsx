@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { createContext, useState, useEffect, useContext, type ReactNode } from 'react';
+import React, { createContext, useState, useEffect, useContext, useRef, type ReactNode } from 'react';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -33,6 +33,12 @@ const isMobileDevice = (): boolean => {
   const isSmallScreen = window.innerWidth <= 768;
   const maxTouchPoints = navigator.maxTouchPoints || 0;
   
+  // Additional checks for mobile browsers that might not be caught by regex
+  const isAndroid = /Android/i.test(userAgent);
+  const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
+  const isMobileSafari = isIOS && /Safari/i.test(userAgent) && !/CriOS|FxiOS/i.test(userAgent);
+  const isMobileChrome = /Chrome/i.test(userAgent) && /Mobile/i.test(userAgent);
+  
   // Log detailed device information for debugging
   console.log('[AuthContext] Device Detection Details:', {
     userAgent: userAgent,
@@ -44,12 +50,17 @@ const isMobileDevice = (): boolean => {
     maxTouchPoints: maxTouchPoints,
     devicePixelRatio: window.devicePixelRatio || 1,
     platform: navigator.platform || 'unknown',
-    vendor: navigator.vendor || 'unknown'
+    vendor: navigator.vendor || 'unknown',
+    isAndroid: isAndroid,
+    isIOS: isIOS,
+    isMobileSafari: isMobileSafari,
+    isMobileChrome: isMobileChrome
   });
   
   // Primary detection: mobile user agent
   // Secondary detection: touch device with small screen (for edge cases)
-  const isMobile = isMobileUA || (isTouchDevice && isSmallScreen);
+  // Tertiary detection: specific mobile browser patterns
+  const isMobile = isMobileUA || (isTouchDevice && isSmallScreen) || isMobileSafari || isMobileChrome;
   
   console.log(`[AuthContext] Final mobile detection result: ${isMobile}`);
   
@@ -66,22 +77,71 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Global flag to prevent multiple AuthProvider instances
+let authProviderInstance: boolean = false;
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isSigningIn, setIsSigningIn] = useState(false);
+  // Initialize isSigningIn from localStorage if available
+  const [isSigningIn, setIsSigningIn] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const wasSigningIn = localStorage.getItem('hsaShield_signingIn') === 'true';
+      const signInTimestamp = localStorage.getItem('hsaShield_signInTimestamp');
+      
+      if (wasSigningIn && signInTimestamp) {
+        const timeDiff = Date.now() - parseInt(signInTimestamp);
+        // If less than 5 minutes, restore the signing in state
+        if (timeDiff < 5 * 60 * 1000) {
+          return true;
+        } else {
+          // Clear old state
+          localStorage.removeItem('hsaShield_signingIn');
+          localStorage.removeItem('hsaShield_signInTimestamp');
+        }
+      }
+    }
+    return false;
+  });
   const router = useRouter();
+  
+  // Use refs to track initialization and prevent race conditions
+  const isInitialized = useRef(false);
+  const redirectResultChecked = useRef(false);
+  const authStateListenerSetup = useRef(false);
 
-  // Log initialization
-  console.log('[AuthContext] AuthProvider initialized', {
-    timestamp: new Date().toISOString(),
-    isClient: typeof window !== 'undefined',
-    userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'SSR',
-    url: typeof window !== 'undefined' ? window.location.href : 'SSR'
-  }); 
+  // Prevent multiple AuthProvider instances
+  useEffect(() => {
+    if (authProviderInstance) {
+      console.warn('[AuthContext] Multiple AuthProvider instances detected. This may cause authentication issues.');
+      return;
+    }
+    authProviderInstance = true;
+    
+    // Log initialization only once
+    if (!isInitialized.current) {
+      console.log('[AuthContext] AuthProvider initialized', {
+        timestamp: new Date().toISOString(),
+        isClient: typeof window !== 'undefined',
+        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'SSR',
+        url: typeof window !== 'undefined' ? window.location.href : 'SSR'
+      });
+      isInitialized.current = true;
+    }
+
+    return () => {
+      authProviderInstance = false;
+    };
+  }, []); 
 
   useEffect(() => {
+    if (authStateListenerSetup.current) {
+      console.log('[AuthContext] Auth state listener already setup, skipping');
+      return;
+    }
+    
     console.log('[AuthContext] Setting up auth state listener');
+    authStateListenerSetup.current = true;
     
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       console.log('[AuthContext] Auth state changed:', {
@@ -111,6 +171,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     
     return () => {
       console.log('[AuthContext] Cleaning up auth state listener');
+      authStateListenerSetup.current = false;
       unsubscribe();
     }
   }, []);
@@ -118,9 +179,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Handle redirect result on component mount
   useEffect(() => {
     const handleRedirectResult = async () => {
+      if (redirectResultChecked.current) {
+        console.log('[AuthContext] Redirect result already checked, skipping');
+        return;
+      }
+      
       console.log('[AuthContext] Checking for redirect result on component mount');
+      redirectResultChecked.current = true;
+      
+      // Check if we were in the middle of a sign-in process
+      const wasSigningIn = typeof window !== 'undefined' ? localStorage.getItem('hsaShield_signingIn') === 'true' : false;
+      const signInTimestamp = typeof window !== 'undefined' ? localStorage.getItem('hsaShield_signInTimestamp') : null;
+      
+      if (wasSigningIn) {
+        console.log('[AuthContext] Detected previous sign-in attempt, checking for redirect result');
+        setIsSigningIn(true); // Set signing in state while we check
+        
+        // Check if the sign-in attempt is too old (more than 5 minutes)
+        if (signInTimestamp) {
+          const timeDiff = Date.now() - parseInt(signInTimestamp);
+          if (timeDiff > 5 * 60 * 1000) { // 5 minutes
+            console.log('[AuthContext] Sign-in attempt is too old, clearing state');
+            localStorage.removeItem('hsaShield_signingIn');
+            localStorage.removeItem('hsaShield_signInTimestamp');
+            setIsSigningIn(false);
+            return;
+          }
+        }
+      }
       
       try {
+        // Add a small delay to ensure Firebase Auth is fully initialized
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const result = await getRedirectResult(auth);
         
         if (result) {
@@ -136,9 +227,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             timestamp: new Date().toISOString()
           });
           
+          // Clear localStorage on successful sign-in
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('hsaShield_signingIn');
+            localStorage.removeItem('hsaShield_signInTimestamp');
+          }
+          
           setIsSigningIn(false);
+          
+          // Show success message for mobile users
+          toast({
+            title: "Welcome!",
+            description: "You have been successfully signed in.",
+            duration: 3000,
+          });
         } else {
-          console.log('[AuthContext] No redirect result found (normal page load)');
+          console.log('[AuthContext] No redirect result found');
+          
+          if (wasSigningIn) {
+            console.log('[AuthContext] Expected redirect result but none found, clearing state');
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('hsaShield_signingIn');
+              localStorage.removeItem('hsaShield_signInTimestamp');
+            }
+            setIsSigningIn(false);
+          }
         }
       } catch (error: any) {
         console.error("[AuthContext] Error handling redirect result:", {
@@ -150,6 +263,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown',
           url: typeof window !== 'undefined' ? window.location.href : 'unknown'
         });
+        
+        // Clear localStorage on error
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('hsaShield_signingIn');
+          localStorage.removeItem('hsaShield_signInTimestamp');
+        }
         
         setIsSigningIn(false);
         
@@ -174,7 +293,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
-    handleRedirectResult();
+    // Only run if we're on the client side and haven't checked yet
+    if (typeof window !== 'undefined' && !redirectResultChecked.current) {
+      handleRedirectResult();
+    }
   }, []);
 
   const signInWithGoogle = async () => {
@@ -193,6 +315,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     if (isSigningIn) {
       console.log("[AuthContext] Sign-in already in progress, ignoring duplicate request");
+      return;
+    }
+
+    // Check if user is already authenticated
+    if (currentUser) {
+      console.log("[AuthContext] User already authenticated, skipping sign-in");
       return;
     }
 
@@ -245,6 +373,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         console.log("[AuthContext] Using signInWithRedirect for mobile device");
         console.log('[AuthContext] About to call signInWithRedirect...');
         
+        // Store sign-in state in localStorage to persist across redirects
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('hsaShield_signingIn', 'true');
+          localStorage.setItem('hsaShield_signInTimestamp', Date.now().toString());
+        }
+        
         await signInWithRedirect(auth, provider);
         
         console.log('[AuthContext] signInWithRedirect call completed, redirect should be happening...');
@@ -259,6 +393,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           timestamp: new Date().toISOString(),
           userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
         });
+        
+        // Clear localStorage on error
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('hsaShield_signingIn');
+          localStorage.removeItem('hsaShield_signInTimestamp');
+        }
         
         setIsSigningIn(false);
         
