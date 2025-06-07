@@ -15,18 +15,45 @@ import { auth } from '@/lib/firebase'; // Using the initialized auth instance fr
 import { useRouter } from 'next/navigation';
 import { toast } from "@/hooks/use-toast";
 
-// Utility function to detect mobile devices
+// Utility function to detect mobile devices with enhanced logging
 const isMobileDevice = (): boolean => {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') {
+    console.log('[AuthContext] isMobileDevice: window is undefined (SSR)');
+    return false;
+  }
   
   const userAgent = window.navigator.userAgent;
   const mobileRegex = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
   
+  // Check for mobile user agent
+  const isMobileUA = mobileRegex.test(userAgent);
+  
   // Also check for touch capability and screen size
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   const isSmallScreen = window.innerWidth <= 768;
+  const maxTouchPoints = navigator.maxTouchPoints || 0;
   
-  return mobileRegex.test(userAgent) || (isTouchDevice && isSmallScreen);
+  // Log detailed device information for debugging
+  console.log('[AuthContext] Device Detection Details:', {
+    userAgent: userAgent,
+    isMobileUA: isMobileUA,
+    isTouchDevice: isTouchDevice,
+    isSmallScreen: isSmallScreen,
+    screenWidth: window.innerWidth,
+    screenHeight: window.innerHeight,
+    maxTouchPoints: maxTouchPoints,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    platform: navigator.platform || 'unknown',
+    vendor: navigator.vendor || 'unknown'
+  });
+  
+  // Primary detection: mobile user agent
+  // Secondary detection: touch device with small screen (for edge cases)
+  const isMobile = isMobileUA || (isTouchDevice && isSmallScreen);
+  
+  console.log(`[AuthContext] Final mobile detection result: ${isMobile}`);
+  
+  return isMobile;
 };
 
 interface AuthContextType {
@@ -43,17 +70,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
-  const router = useRouter(); 
+  const router = useRouter();
+
+  // Log initialization
+  console.log('[AuthContext] AuthProvider initialized', {
+    timestamp: new Date().toISOString(),
+    isClient: typeof window !== 'undefined',
+    userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'SSR',
+    url: typeof window !== 'undefined' ? window.location.href : 'SSR'
+  }); 
 
   useEffect(() => {
+    console.log('[AuthContext] Setting up auth state listener');
+    
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log('[AuthContext] Auth state changed:', {
+        hasUser: !!user,
+        userId: user?.uid || null,
+        email: user?.email || null,
+        displayName: user?.displayName || null,
+        emailVerified: user?.emailVerified || null,
+        isAnonymous: user?.isAnonymous || null,
+        providerData: user?.providerData?.map(p => ({
+          providerId: p.providerId,
+          uid: p.uid
+        })) || null,
+        timestamp: new Date().toISOString()
+      });
+      
       setCurrentUser(user);
       setLoading(false);
+      
       if (user) {
+        console.log('[AuthContext] User authenticated, resetting signing in state');
         setIsSigningIn(false); // Reset signing in state when user is authenticated
+      } else {
+        console.log('[AuthContext] User signed out or not authenticated');
       }
     });
+    
     return () => {
+      console.log('[AuthContext] Cleaning up auth state listener');
       unsubscribe();
     }
   }, []);
@@ -61,19 +118,44 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Handle redirect result on component mount
   useEffect(() => {
     const handleRedirectResult = async () => {
+      console.log('[AuthContext] Checking for redirect result on component mount');
+      
       try {
         const result = await getRedirectResult(auth);
+        
         if (result) {
           // User successfully signed in via redirect
-          console.log("[AuthContext] Sign-in via redirect successful");
+          console.log("[AuthContext] Sign-in via redirect successful:", {
+            user: {
+              uid: result.user.uid,
+              email: result.user.email,
+              displayName: result.user.displayName,
+              emailVerified: result.user.emailVerified
+            },
+            operationType: result.operationType,
+            timestamp: new Date().toISOString()
+          });
+          
           setIsSigningIn(false);
+        } else {
+          console.log('[AuthContext] No redirect result found (normal page load)');
         }
       } catch (error: any) {
-        console.error("[AuthContext] Error handling redirect result:", error.code, error.message);
+        console.error("[AuthContext] Error handling redirect result:", {
+          code: error.code,
+          message: error.message,
+          stack: error.stack,
+          customData: error.customData,
+          timestamp: new Date().toISOString(),
+          userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown',
+          url: typeof window !== 'undefined' ? window.location.href : 'unknown'
+        });
+        
         setIsSigningIn(false);
         
         // Handle redirect-specific errors
         if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+          console.log('[AuthContext] Redirect cancelled by user');
           toast({
             variant: 'destructive',
             title: "Sign-In Interrupted",
@@ -81,6 +163,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             duration: 7000,
           });
         } else {
+          console.log('[AuthContext] Unexpected redirect error, showing generic error message');
           toast({
             variant: 'destructive',
             title: "Sign-In Failed",
@@ -95,6 +178,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signInWithGoogle = async () => {
+    console.log('[AuthContext] signInWithGoogle called');
+    
     if (!auth) {
       console.error("[AuthContext] Firebase auth instance from '@/lib/firebase' is not available.");
       toast({
@@ -111,6 +196,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
+    console.log('[AuthContext] Starting sign-in process');
     setIsSigningIn(true);
 
     const provider = new GoogleAuthProvider();
@@ -120,18 +206,60 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       prompt: 'select_account'
     });
 
+    console.log('[AuthContext] Google Auth Provider configured with scopes:', ['profile', 'email']);
+
     const isMobile = isMobileDevice();
-    console.log(`[AuthContext] Device type: ${isMobile ? 'Mobile' : 'Desktop'}`);
+    console.log(`[AuthContext] Device type determined: ${isMobile ? 'Mobile' : 'Desktop'}`);
+
+    // Log browser capabilities for mobile debugging
+    if (typeof window !== 'undefined') {
+      console.log('[AuthContext] Browser capabilities:', {
+        cookieEnabled: navigator.cookieEnabled,
+        onLine: navigator.onLine,
+        language: navigator.language,
+        languages: navigator.languages,
+        doNotTrack: navigator.doNotTrack,
+        hardwareConcurrency: navigator.hardwareConcurrency,
+        deviceMemory: (navigator as any).deviceMemory || 'unknown',
+        connection: (navigator as any).connection ? {
+          effectiveType: (navigator as any).connection.effectiveType,
+          downlink: (navigator as any).connection.downlink,
+          rtt: (navigator as any).connection.rtt
+        } : 'unknown',
+        storage: {
+          localStorage: !!window.localStorage,
+          sessionStorage: !!window.sessionStorage,
+          indexedDB: !!window.indexedDB
+        },
+        location: {
+          protocol: window.location.protocol,
+          host: window.location.host,
+          pathname: window.location.pathname
+        }
+      });
+    }
 
     // For mobile devices, use redirect method directly as it's more reliable
     if (isMobile) {
       try {
         console.log("[AuthContext] Using signInWithRedirect for mobile device");
+        console.log('[AuthContext] About to call signInWithRedirect...');
+        
         await signInWithRedirect(auth, provider);
+        
+        console.log('[AuthContext] signInWithRedirect call completed, redirect should be happening...');
         // The redirect will happen, and the result will be handled in the useEffect
         return;
       } catch (error: any) {
-        console.error("[AuthContext] Error during signInWithRedirect:", error.code, error.message);
+        console.error("[AuthContext] Error during signInWithRedirect:", {
+          code: error.code,
+          message: error.message,
+          stack: error.stack,
+          customData: error.customData,
+          timestamp: new Date().toISOString(),
+          userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
+        });
+        
         setIsSigningIn(false);
         
         toast({
@@ -147,12 +275,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // For desktop devices, try popup first with fallback to redirect
     try {
       console.log("[AuthContext] Attempting signInWithPopup for desktop device");
-      await signInWithPopup(auth, provider);
+      console.log('[AuthContext] About to call signInWithPopup...');
+      
+      const result = await signInWithPopup(auth, provider);
+      
+      console.log("[AuthContext] Sign-in with popup successful:", {
+        user: {
+          uid: result.user.uid,
+          email: result.user.email,
+          displayName: result.user.displayName,
+          emailVerified: result.user.emailVerified
+        },
+        operationType: result.operationType,
+        timestamp: new Date().toISOString()
+      });
+      
       setIsSigningIn(false);
-      console.log("[AuthContext] Sign-in with popup successful");
       // Successful sign-in will be handled by onAuthStateChanged
     } catch (error: any) {
-      console.error("[AuthContext] Error during signInWithPopup:", error.code, error.message);
+      console.error("[AuthContext] Error during signInWithPopup:", {
+        code: error.code,
+        message: error.message,
+        stack: error.stack,
+        customData: error.customData,
+        timestamp: new Date().toISOString(),
+        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
+      });
       
       // If popup fails due to being closed by user or other popup-related issues, 
       // fall back to redirect method
@@ -160,7 +308,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           error.code === 'auth/cancelled-popup-request' ||
           error.code === 'auth/popup-blocked') {
         
-        console.log("[AuthContext] Popup failed, falling back to redirect method");
+        console.log("[AuthContext] Popup failed, falling back to redirect method. Error details:", {
+          code: error.code,
+          reason: 'popup_blocked_or_closed'
+        });
         
         toast({
           title: "Switching Sign-In Method",
@@ -169,11 +320,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         });
 
         try {
+          console.log('[AuthContext] Attempting fallback signInWithRedirect...');
           await signInWithRedirect(auth, provider);
+          console.log('[AuthContext] Fallback signInWithRedirect call completed, redirect should be happening...');
           // The redirect will happen, and the result will be handled in the useEffect
           return;
         } catch (redirectError: any) {
-          console.error("[AuthContext] Error during fallback signInWithRedirect:", redirectError.code, redirectError.message);
+          console.error("[AuthContext] Error during fallback signInWithRedirect:", {
+            code: redirectError.code,
+            message: redirectError.message,
+            stack: redirectError.stack,
+            customData: redirectError.customData,
+            timestamp: new Date().toISOString(),
+            originalError: error.code
+          });
+          
           setIsSigningIn(false);
           
           toast({
@@ -184,6 +345,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           });
         }
       } else if (error.code === 'auth/unauthorized-domain') {
+        console.log('[AuthContext] Unauthorized domain error - configuration issue');
         setIsSigningIn(false);
         toast({
           variant: 'destructive',
@@ -192,6 +354,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           duration: 10000,
         });
       } else {
+        console.log('[AuthContext] Unexpected error during popup sign-in:', error.code);
         setIsSigningIn(false);
         toast({
           variant: 'destructive',
@@ -204,13 +367,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOutUser = async () => {
+    console.log('[AuthContext] signOutUser called');
+    
     try {
+      console.log('[AuthContext] Attempting to sign out user');
       await signOut(auth);
+      console.log('[AuthContext] Sign out successful');
+      
       // Navigation to home or login page can be handled by the layout/page components
       // observing the currentUser state change.
       // router.push('/'); 
     } catch (error: any) {
-      console.error("[AuthContext] Error signing out: ", error);
+      console.error("[AuthContext] Error signing out:", {
+        code: error.code,
+        message: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString(),
+        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
+      });
+      
       toast({
         variant: 'destructive',
         title: "Sign-Out Failed",
