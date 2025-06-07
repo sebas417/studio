@@ -5,6 +5,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { siteConfig } from '@/config/site';
 import { AuthProvider } from '@/contexts/AuthContext'; // Added
+import { NavigationProvider } from '@/contexts/NavigationContext';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -33,8 +34,10 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AuthProvider> {/* Added AuthProvider wrapper */}
-          {children}
-          <Toaster />
+          <NavigationProvider>
+            {children}
+            <Toaster />
+          </NavigationProvider>
         </AuthProvider>
       </body>
     </html>

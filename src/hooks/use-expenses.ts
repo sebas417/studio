@@ -43,16 +43,22 @@ interface FirestoreExpenseDoc {
 export function useExpenses() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const { currentUser } = useAuth(); // Added
 
   useEffect(() => {
     if (!currentUser) {
       setExpenses([]);
       setIsLoading(false);
+      setIsInitialLoad(false);
       return; // Don't fetch if no user
     }
 
-    setIsLoading(true);
+    // Only show loading for initial load, not for subsequent updates
+    if (isInitialLoad) {
+      setIsLoading(true);
+    }
+    
     const expensesCollectionRef = collection(db, 'expenses');
     // Query now includes where clause for userId and requires a composite index
     // Index: userId ASC, date DESC, createdAt DESC
@@ -82,6 +88,7 @@ export function useExpenses() {
       });
       setExpenses(expensesData);
       setIsLoading(false);
+      setIsInitialLoad(false);
     }, (error) => {
       console.error("Error fetching expenses from Firestore:", error);
       toast({
@@ -90,10 +97,11 @@ export function useExpenses() {
         description: "Could not fetch expenses. " + error.message,
       });
       setIsLoading(false);
+      setIsInitialLoad(false);
     });
 
     return () => unsubscribe();
-  }, [currentUser]); // Re-run when currentUser changes
+  }, [currentUser, isInitialLoad]); // Re-run when currentUser changes
 
   const addExpense = useCallback(async (
     data: Omit<Expense, 'id' | 'date' | 'dateOfPayment'> & { 
@@ -302,6 +310,7 @@ export function useExpenses() {
   return {
     expenses,
     isLoading,
+    isInitialLoad,
     addExpense,
     updateExpense,
     deleteExpense,

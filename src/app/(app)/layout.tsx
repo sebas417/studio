@@ -7,6 +7,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { mainNav, siteConfig } from '@/config/site';
 import { AppLogo } from '@/components/AppLogo';
+import { useNavigation } from '@/contexts/NavigationContext';
+import { LoadingBar, LoadingSpinner } from '@/components/ui/loading-bar';
 import {
   SidebarProvider,
   Sidebar,
@@ -100,6 +102,13 @@ function MainSidebarContent() {
   const { state: sidebarState } = useSidebar();
   const isCollapsed = sidebarState === 'collapsed';
   const { currentUser, loading } = useAuth();
+  const { navigateWithLoading, isNavigating } = useNavigation();
+  const router = useRouter();
+
+  // Prefetch routes on hover for better performance
+  const handleMouseEnter = React.useCallback((href: string) => {
+    router.prefetch(href);
+  }, [router]);
 
   if (loading) {
     return (
@@ -135,17 +144,38 @@ function MainSidebarContent() {
           <SidebarMenu>
             {mainNav.map((item) => (
               <SidebarMenuItem key={item.href} className={!currentUser && !loading ? 'opacity-50 pointer-events-none' : ''}>
-                <Link href={item.href} legacyBehavior passHref>
-                  <SidebarMenuButton
-                    isActive={pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))}
-                    tooltip={isCollapsed ? item.title : undefined}
-                    className="justify-start"
-                    disabled={!currentUser && !loading && item.href !== '/'} 
-                  >
-                    <item.icon className="h-5 w-5" />
-                    {!isCollapsed && <span>{item.title}</span>}
-                  </SidebarMenuButton>
-                </Link>
+                <SidebarMenuButton
+                  isActive={pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))}
+                  tooltip={isCollapsed ? item.title : undefined}
+                  className={cn(
+                    "justify-start transition-all duration-200",
+                    isNavigating && "opacity-70 cursor-wait"
+                  )}
+                  disabled={!currentUser && !loading && item.href !== '/' || isNavigating}
+                  onMouseEnter={() => handleMouseEnter(item.href)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (!isNavigating && currentUser) {
+                      navigateWithLoading(item.href);
+                    }
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    {isNavigating && pathname !== item.href ? (
+                      <LoadingSpinner size="sm" />
+                    ) : (
+                      <item.icon className="h-5 w-5" />
+                    )}
+                    {!isCollapsed && (
+                      <span className={cn(
+                        "transition-opacity duration-200",
+                        isNavigating && "opacity-70"
+                      )}>
+                        {item.title}
+                      </span>
+                    )}
+                  </div>
+                </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
           </SidebarMenu>
@@ -162,6 +192,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { currentUser, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const { isNavigating } = useNavigation();
 
   React.useEffect(() => {
     if (!loading && !currentUser && pathname !== '/') {
@@ -181,6 +212,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <SidebarProvider defaultOpen={true}>
+      <LoadingBar isLoading={isNavigating} />
       <div className="flex min-h-screen">
         {currentUser && ( 
           <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -192,11 +224,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-2">
                {currentUser && <SidebarTrigger className="md:hidden" />}
                <h1 className="text-xl font-semibold tracking-tight">
+                 {isNavigating && (
+                   <div className="flex items-center gap-2">
+                     <LoadingSpinner size="sm" />
+                     <span className="text-sm text-muted-foreground">Loading...</span>
+                   </div>
+                 )}
                </h1>
             </div>
             <UserNav />
           </header>
-          <main className="flex-1 overflow-y-auto p-6">
+          <main className={cn(
+            "flex-1 overflow-y-auto p-6 transition-opacity duration-200",
+            isNavigating && "opacity-70"
+          )}>
             {currentUser ? children : (
               <div className="flex flex-col items-center justify-center h-full text-center">
                 <AppLogo />
