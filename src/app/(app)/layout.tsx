@@ -35,7 +35,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from '@/components/ui/skeleton';
 
 function UserNav() {
-  const { currentUser, loading, signInWithGoogle, signOutUser } = useAuth();
+  const { currentUser, loading, signInWithGoogle, signOutUser, isSigningIn } = useAuth();
   const router = useRouter();
 
   const handleSignIn = () => {
@@ -54,9 +54,18 @@ function UserNav() {
 
   if (!currentUser) {
     return (
-      <Button onClick={handleSignIn} variant="outline">
-        <LogIn className="mr-2 h-4 w-4" />
-        Sign in with Google
+      <Button onClick={handleSignIn} variant="outline" disabled={isSigningIn}>
+        {isSigningIn ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Signing in...
+          </>
+        ) : (
+          <>
+            <LogIn className="mr-2 h-4 w-4" />
+            Sign in with Google
+          </>
+        )}
       </Button>
     );
   }

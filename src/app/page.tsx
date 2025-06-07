@@ -29,7 +29,7 @@ const Loader2 = ({ className, ...props }: React.ComponentProps<typeof LogIn>) =>
 
 
 export default function RootPage() {
-  const { currentUser, loading, signInWithGoogle } = useAuth();
+  const { currentUser, loading, signInWithGoogle, isSigningIn } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -58,9 +58,23 @@ export default function RootPage() {
         <p className="mt-4 text-lg text-muted-foreground">
           Track your HSA expenses with ease. Scan receipts, manage reimbursements, and stay organized.
         </p>
-        <Button onClick={signInWithGoogle} size="lg" className="mt-8">
-          <LogIn className="mr-2 h-5 w-5" />
-          Sign in with Google to Get Started
+        <Button 
+          onClick={signInWithGoogle} 
+          size="lg" 
+          className="mt-8" 
+          disabled={isSigningIn}
+        >
+          {isSigningIn ? (
+            <>
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              Signing in...
+            </>
+          ) : (
+            <>
+              <LogIn className="mr-2 h-5 w-5" />
+              Sign in with Google to Get Started
+            </>
+          )}
         </Button>
       </div>
     );

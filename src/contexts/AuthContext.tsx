@@ -2,16 +2,39 @@
 "use client";
 
 import React, { createContext, useState, useEffect, useContext, type ReactNode } from 'react';
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, type User } from 'firebase/auth';
+import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult,
+  GoogleAuthProvider, 
+  signOut, 
+  type User 
+} from 'firebase/auth';
 import { auth } from '@/lib/firebase'; // Using the initialized auth instance from our firebase lib
 import { useRouter } from 'next/navigation';
 import { toast } from "@/hooks/use-toast";
+
+// Utility function to detect mobile devices
+const isMobileDevice = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  
+  const userAgent = window.navigator.userAgent;
+  const mobileRegex = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
+  
+  // Also check for touch capability and screen size
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const isSmallScreen = window.innerWidth <= 768;
+  
+  return mobileRegex.test(userAgent) || (isTouchDevice && isSmallScreen);
+};
 
 interface AuthContextType {
   currentUser: User | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signOutUser: () => Promise<void>;
+  isSigningIn: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -19,16 +42,56 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const router = useRouter(); 
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setLoading(false);
+      if (user) {
+        setIsSigningIn(false); // Reset signing in state when user is authenticated
+      }
     });
     return () => {
       unsubscribe();
     }
+  }, []);
+
+  // Handle redirect result on component mount
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result) {
+          // User successfully signed in via redirect
+          console.log("[AuthContext] Sign-in via redirect successful");
+          setIsSigningIn(false);
+        }
+      } catch (error: any) {
+        console.error("[AuthContext] Error handling redirect result:", error.code, error.message);
+        setIsSigningIn(false);
+        
+        // Handle redirect-specific errors
+        if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+          toast({
+            variant: 'destructive',
+            title: "Sign-In Interrupted",
+            description: "The sign-in process was cancelled. Please try again.",
+            duration: 7000,
+          });
+        } else {
+          toast({
+            variant: 'destructive',
+            title: "Sign-In Failed",
+            description: "An error occurred during sign-in. Please try again.",
+            duration: 7000,
+          });
+        }
+      }
+    };
+
+    handleRedirectResult();
   }, []);
 
   const signInWithGoogle = async () => {
@@ -43,39 +106,93 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
+    if (isSigningIn) {
+      console.log("[AuthContext] Sign-in already in progress, ignoring duplicate request");
+      return;
+    }
+
+    setIsSigningIn(true);
+
     const provider = new GoogleAuthProvider();
     provider.addScope('profile');
     provider.addScope('email');
     provider.setCustomParameters({
       prompt: 'select_account'
     });
-    
-    try {
-      await signInWithPopup(auth, provider);
-      // Successful sign-in will be handled by onAuthStateChanged
-      // User will be redirected by logic in page.tsx or layout.tsx based on currentUser state
-    } catch (error: any) {
-      console.error("[AuthContext] Error during signInWithPopup: ", error.code, error.message);
-      
-      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+
+    const isMobile = isMobileDevice();
+    console.log(`[AuthContext] Device type: ${isMobile ? 'Mobile' : 'Desktop'}`);
+
+    // For mobile devices, use redirect method directly as it's more reliable
+    if (isMobile) {
+      try {
+        console.log("[AuthContext] Using signInWithRedirect for mobile device");
+        await signInWithRedirect(auth, provider);
+        // The redirect will happen, and the result will be handled in the useEffect
+        return;
+      } catch (error: any) {
+        console.error("[AuthContext] Error during signInWithRedirect:", error.code, error.message);
+        setIsSigningIn(false);
+        
         toast({
           variant: 'destructive',
-          title: "Sign-In Interrupted",
-          description: "The sign-in process didn't complete. This can sometimes happen due to browser settings or if the window was closed prematurely. Please try again. If the issue persists, try clearing browser cookies.",
-          duration: 10000,
+          title: "Sign-In Failed",
+          description: "Unable to start the sign-in process. Please try again.",
+          duration: 7000,
         });
+        return;
+      }
+    }
+
+    // For desktop devices, try popup first with fallback to redirect
+    try {
+      console.log("[AuthContext] Attempting signInWithPopup for desktop device");
+      await signInWithPopup(auth, provider);
+      setIsSigningIn(false);
+      console.log("[AuthContext] Sign-in with popup successful");
+      // Successful sign-in will be handled by onAuthStateChanged
+    } catch (error: any) {
+      console.error("[AuthContext] Error during signInWithPopup:", error.code, error.message);
+      
+      // If popup fails due to being closed by user or other popup-related issues, 
+      // fall back to redirect method
+      if (error.code === 'auth/popup-closed-by-user' || 
+          error.code === 'auth/cancelled-popup-request' ||
+          error.code === 'auth/popup-blocked') {
+        
+        console.log("[AuthContext] Popup failed, falling back to redirect method");
+        
+        toast({
+          title: "Switching Sign-In Method",
+          description: "Popup was blocked or closed. Redirecting to Google sign-in page...",
+          duration: 3000,
+        });
+
+        try {
+          await signInWithRedirect(auth, provider);
+          // The redirect will happen, and the result will be handled in the useEffect
+          return;
+        } catch (redirectError: any) {
+          console.error("[AuthContext] Error during fallback signInWithRedirect:", redirectError.code, redirectError.message);
+          setIsSigningIn(false);
+          
+          toast({
+            variant: 'destructive',
+            title: "Sign-In Failed",
+            description: "Unable to complete sign-in. Please try again or contact support if the issue persists.",
+            duration: 10000,
+          });
+        }
       } else if (error.code === 'auth/unauthorized-domain') {
-        // This error is primarily for the developer during setup.
-        // A user ideally shouldn't see this if the app is correctly configured.
-        // We'll show a generic error to the user for other cases.
-         toast({
+        setIsSigningIn(false);
+        toast({
           variant: 'destructive',
           title: "Sign-In Configuration Issue",
           description: "There seems to be a configuration problem with sign-in. Please contact support if this issue persists.",
           duration: 10000,
         });
-      }
-      else {
+      } else {
+        setIsSigningIn(false);
         toast({
           variant: 'destructive',
           title: "Sign-In Failed",
@@ -107,6 +224,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     loading,
     signInWithGoogle,
     signOutUser,
+    isSigningIn,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
