@@ -11,60 +11,18 @@ import {
   signOut, 
   type User 
 } from 'firebase/auth';
-import { auth } from '@/lib/firebase'; // Using the initialized auth instance from our firebase lib
+import { auth } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { toast } from "@/hooks/use-toast";
 
-// Utility function to detect mobile devices with enhanced logging
 const isMobileDevice = (): boolean => {
-  if (typeof window === 'undefined') {
-    console.log('[AuthContext] isMobileDevice: window is undefined (SSR)');
-    return false;
-  }
-  
+  if (typeof window === 'undefined') return false;
   const userAgent = window.navigator.userAgent;
   const mobileRegex = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
-  
-  // Check for mobile user agent
   const isMobileUA = mobileRegex.test(userAgent);
-  
-  // Also check for touch capability and screen size
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  const isSmallScreen = window.innerWidth <= 768;
-  const maxTouchPoints = navigator.maxTouchPoints || 0;
-  
-  // Additional checks for mobile browsers that might not be caught by regex
-  const isAndroid = /Android/i.test(userAgent);
-  const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
-  const isMobileSafari = isIOS && /Safari/i.test(userAgent) && !/CriOS|FxiOS/i.test(userAgent);
-  const isMobileChrome = /Chrome/i.test(userAgent) && /Mobile/i.test(userAgent);
-  
-  // Log detailed device information for debugging
-  console.log('[AuthContext] Device Detection Details:', {
-    userAgent: userAgent,
-    isMobileUA: isMobileUA,
-    isTouchDevice: isTouchDevice,
-    isSmallScreen: isSmallScreen,
-    screenWidth: window.innerWidth,
-    screenHeight: window.innerHeight,
-    maxTouchPoints: maxTouchPoints,
-    devicePixelRatio: window.devicePixelRatio || 1,
-    platform: navigator.platform || 'unknown',
-    vendor: navigator.vendor || 'unknown',
-    isAndroid: isAndroid,
-    isIOS: isIOS,
-    isMobileSafari: isMobileSafari,
-    isMobileChrome: isMobileChrome
-  });
-  
-  // Primary detection: mobile user agent
-  // Secondary detection: touch device with small screen (for edge cases)
-  // Tertiary detection: specific mobile browser patterns
-  const isMobile = isMobileUA || (isTouchDevice && isSmallScreen) || isMobileSafari || isMobileChrome;
-  
-  console.log(`[AuthContext] Final mobile detection result: ${isMobile}`);
-  
-  return isMobile;
+  const isSmallScreen = window.innerWidth <= 768; // Common tablet portrait width
+  return isMobileUA || (isTouchDevice && isSmallScreen);
 };
 
 interface AuthContextType {
@@ -76,479 +34,211 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-// Global flag to prevent multiple AuthProvider instances
 let authProviderInstance: boolean = false;
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  // Initialize isSigningIn from localStorage if available
   const [isSigningIn, setIsSigningIn] = useState(() => {
     if (typeof window !== 'undefined') {
       const wasSigningIn = localStorage.getItem('hsaShield_signingIn') === 'true';
       const signInTimestamp = localStorage.getItem('hsaShield_signInTimestamp');
-      
-      if (wasSigningIn && signInTimestamp) {
-        const timeDiff = Date.now() - parseInt(signInTimestamp);
-        // If less than 5 minutes, restore the signing in state
-        if (timeDiff < 5 * 60 * 1000) {
-          return true;
-        } else {
-          // Clear old state
-          localStorage.removeItem('hsaShield_signingIn');
-          localStorage.removeItem('hsaShield_signInTimestamp');
-        }
+      if (wasSigningIn && signInTimestamp && (Date.now() - parseInt(signInTimestamp) < 5 * 60 * 1000)) {
+        return true;
       }
+      localStorage.removeItem('hsaShield_signingIn');
+      localStorage.removeItem('hsaShield_signInTimestamp');
     }
     return false;
   });
-  const router = useRouter();
   
-  // Use refs to track initialization and prevent race conditions
   const isInitialized = useRef(false);
   const redirectResultChecked = useRef(false);
   const authStateListenerSetup = useRef(false);
 
-  // Prevent multiple AuthProvider instances
   useEffect(() => {
     if (authProviderInstance) {
-      console.warn('[AuthContext] Multiple AuthProvider instances detected. This may cause authentication issues.');
+      console.warn('[AuthContext] Multiple AuthProvider instances detected.');
       return;
     }
     authProviderInstance = true;
-    
-    // Log initialization only once
     if (!isInitialized.current) {
-      console.log('[AuthContext] AuthProvider initialized', {
-        timestamp: new Date().toISOString(),
-        isClient: typeof window !== 'undefined',
-        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'SSR',
-        url: typeof window !== 'undefined' ? window.location.href : 'SSR'
-      });
+      console.log('[AuthContext] AuthProvider initialized', { timestamp: new Date().toISOString(), isClient: typeof window !== 'undefined' });
       isInitialized.current = true;
     }
-
-    return () => {
-      authProviderInstance = false;
-    };
+    return () => { authProviderInstance = false; };
   }, []); 
 
   useEffect(() => {
-    if (authStateListenerSetup.current) {
-      console.log('[AuthContext] Auth state listener already setup, skipping');
-      return;
-    }
-    
-    console.log('[AuthContext] Setting up auth state listener');
+    if (authStateListenerSetup.current) return;
     authStateListenerSetup.current = true;
     
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log('[AuthContext] Auth state changed:', {
-        hasUser: !!user,
-        userId: user?.uid || null,
-        email: user?.email || null,
-        displayName: user?.displayName || null,
-        emailVerified: user?.emailVerified || null,
-        isAnonymous: user?.isAnonymous || null,
-        providerData: user?.providerData?.map(p => ({
-          providerId: p.providerId,
-          uid: p.uid
-        })) || null,
-        timestamp: new Date().toISOString()
-      });
-      
+      console.log('[AuthContext] Auth state changed. User:', user ? user.uid : null);
       setCurrentUser(user);
       setLoading(false);
-      
       if (user) {
-        console.log('[AuthContext] User authenticated, resetting signing in state');
-        setIsSigningIn(false); // Reset signing in state when user is authenticated
-      } else {
-        console.log('[AuthContext] User signed out or not authenticated');
+        setIsSigningIn(false); 
+        localStorage.removeItem('hsaShield_signingIn');
+        localStorage.removeItem('hsaShield_signInTimestamp');
       }
     });
     
-    return () => {
-      console.log('[AuthContext] Cleaning up auth state listener');
+    return () => { 
       authStateListenerSetup.current = false;
       unsubscribe();
-    }
+    };
   }, []);
 
-  // Handle redirect result on component mount
   useEffect(() => {
     const handleRedirectResult = async () => {
-      if (redirectResultChecked.current) {
-        console.log('[AuthContext] Redirect result already checked, skipping');
-        return;
-      }
-      
-      console.log('[AuthContext] Checking for redirect result on component mount');
+      if (redirectResultChecked.current || typeof window === 'undefined') return;
       redirectResultChecked.current = true;
       
-      // Check if we were in the middle of a sign-in process
-      const wasSigningIn = typeof window !== 'undefined' ? localStorage.getItem('hsaShield_signingIn') === 'true' : false;
-      const signInTimestamp = typeof window !== 'undefined' ? localStorage.getItem('hsaShield_signInTimestamp') : null;
-      
+      const wasSigningIn = localStorage.getItem('hsaShield_signingIn') === 'true';
+      const signInTimestamp = localStorage.getItem('hsaShield_signInTimestamp');
+
       if (wasSigningIn) {
-        console.log('[AuthContext] Detected previous sign-in attempt, checking for redirect result');
-        setIsSigningIn(true); // Set signing in state while we check
-        
-        // Check if the sign-in attempt is too old (more than 5 minutes)
-        if (signInTimestamp) {
-          const timeDiff = Date.now() - parseInt(signInTimestamp);
-          if (timeDiff > 5 * 60 * 1000) { // 5 minutes
-            console.log('[AuthContext] Sign-in attempt is too old, clearing state');
-            localStorage.removeItem('hsaShield_signingIn');
-            localStorage.removeItem('hsaShield_signInTimestamp');
-            setIsSigningIn(false);
-            return;
-          }
+        console.log('[AuthContext] Detected previous redirect sign-in attempt.');
+        if (signInTimestamp && (Date.now() - parseInt(signInTimestamp) > 10 * 60 * 1000)) { // 10 min timeout
+          console.log('[AuthContext] Sign-in attempt timed out.');
+          localStorage.removeItem('hsaShield_signingIn');
+          localStorage.removeItem('hsaShield_signInTimestamp');
+          setIsSigningIn(false);
+          return;
+        }
+        // No need to setIsSigningIn(true) here as it's set before calling signInWithRedirect
+      } else {
+        // If not expecting a redirect result, no need to call getRedirectResult unless currentUser is null and still loading
+        // This avoids calling getRedirectResult unnecessarily on every page load after initial sign-in.
+        if (currentUser || !loading) { // If user exists or initial loading is done, no pending redirect.
+             console.log('[AuthContext] No pending sign-in redirect detected or already authenticated.');
+             setIsSigningIn(false); // Ensure signingIn state is false if no redirect was pending
+             localStorage.removeItem('hsaShield_signingIn'); // Clean up any stale flags
+             localStorage.removeItem('hsaShield_signInTimestamp');
+             return;
         }
       }
       
       try {
-        // Add a small delay to ensure Firebase Auth is fully initialized
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
+        console.log('[AuthContext] Attempting getRedirectResult...');
+        // Add small delay for Firebase to initialize if needed, especially on mobile
+        await new Promise(resolve => setTimeout(resolve, 200));
         const result = await getRedirectResult(auth);
-        
-        if (result) {
-          // User successfully signed in via redirect
-          console.log("[AuthContext] Sign-in via redirect successful:", {
-            user: {
-              uid: result.user.uid,
-              email: result.user.email,
-              displayName: result.user.displayName,
-              emailVerified: result.user.emailVerified
-            },
-            operationType: result.operationType,
-            timestamp: new Date().toISOString()
-          });
-          
-          // Clear localStorage on successful sign-in
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('hsaShield_signingIn');
-            localStorage.removeItem('hsaShield_signInTimestamp');
-          }
-          
-          setIsSigningIn(false);
-          
-          // Show success message for mobile users
-          toast({
-            title: "Welcome!",
-            description: "You have been successfully signed in.",
-            duration: 3000,
-          });
+        console.log('[AuthContext] getRedirectResult call completed. Raw Result:', result);
+
+        if (result && result.user) {
+          console.log("[AuthContext] Sign-in via redirect successful. User:", result.user.uid);
+          // setCurrentUser will be called by onAuthStateChanged
+          // No need to toast here, onAuthStateChanged and page navigation will handle user experience.
         } else {
-          console.log('[AuthContext] No redirect result found');
-          
-          if (wasSigningIn) {
-            console.log('[AuthContext] Expected redirect result but none found, clearing state');
-            if (typeof window !== 'undefined') {
-              localStorage.removeItem('hsaShield_signingIn');
-              localStorage.removeItem('hsaShield_signInTimestamp');
-            }
-            setIsSigningIn(false);
+          console.log('[AuthContext] No redirect result or no user in result.');
+          if (wasSigningIn) { // Only show error if we were expecting a result
+             toast({
+              variant: 'destructive',
+              title: "Sign-In Incomplete",
+              description: "Could not finalize sign-in. Please try again. If this persists, ensure cookies are enabled.",
+              duration: 7000,
+            });
           }
         }
       } catch (error: any) {
-        console.error("[AuthContext] Error handling redirect result:", {
-          code: error.code,
-          message: error.message,
-          stack: error.stack,
-          customData: error.customData,
-          timestamp: new Date().toISOString(),
-          userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown',
-          url: typeof window !== 'undefined' ? window.location.href : 'unknown'
-        });
-        
-        // Clear localStorage on error
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('hsaShield_signingIn');
-          localStorage.removeItem('hsaShield_signInTimestamp');
+        console.error("[AuthContext] Error during getRedirectResult call:", { code: error.code, message: error.message });
+        if (wasSigningIn) { // Only show error if we were expecting a result
+            toast({
+              variant: 'destructive',
+              title: "Sign-In Error",
+              description: "An error occurred while finalizing sign-in. Please try again.",
+              duration: 7000,
+            });
         }
-        
-        setIsSigningIn(false);
-        
-        // Handle redirect-specific errors
-        if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
-          console.log('[AuthContext] Redirect cancelled by user');
-          toast({
-            variant: 'destructive',
-            title: "Sign-In Interrupted",
-            description: "The sign-in process was cancelled. Please try again.",
-            duration: 7000,
-          });
-        } else {
-          console.log('[AuthContext] Unexpected redirect error, showing generic error message');
-          toast({
-            variant: 'destructive',
-            title: "Sign-In Failed",
-            description: "An error occurred during sign-in. Please try again.",
-            duration: 7000,
-          });
+      } finally {
+        if (wasSigningIn) { // Always clear flags if we attempted to process a redirect
+            localStorage.removeItem('hsaShield_signingIn');
+            localStorage.removeItem('hsaShield_signInTimestamp');
         }
+        //setIsSigningIn(false); // isSigningIn is primarily for the *initiation* of sign-in
+                               // and should be definitively set to false by onAuthStateChanged or if redirect fails early
       }
     };
 
-    // Only run if we're on the client side and haven't checked yet
-    if (typeof window !== 'undefined' && !redirectResultChecked.current) {
-      handleRedirectResult();
+    if (document.readyState === 'complete') {
+        handleRedirectResult();
+    } else {
+        window.addEventListener('load', handleRedirectResult, { once: true });
+        return () => window.removeEventListener('load', handleRedirectResult);
     }
-  }, []);
+
+  }, [currentUser, loading]); // Added currentUser and loading as dependencies
 
   const signInWithGoogle = async () => {
-    console.log('[AuthContext] signInWithGoogle called');
-    
     if (!auth) {
-      console.error("[AuthContext] Firebase auth instance from '@/lib/firebase' is not available.");
-      toast({
-        variant: 'destructive',
-        title: "Authentication Service Error",
-        description: "The authentication service is currently unavailable. Please try again later.",
-        duration: 7000,
-      });
+      console.error("[AuthContext] Firebase auth instance is not available.");
+      toast({ variant: 'destructive', title: "Service Error", description: "Authentication service unavailable. Try again later." });
       return;
     }
+    if (currentUser) return; // Already signed in
+    if (isSigningIn) return; // Sign-in already in progress
 
-    if (isSigningIn) {
-      console.log("[AuthContext] Sign-in already in progress, ignoring duplicate request");
-      return;
-    }
-
-    // Check if user is already authenticated
-    if (currentUser) {
-      console.log("[AuthContext] User already authenticated, skipping sign-in");
-      return;
-    }
-
-    console.log('[AuthContext] Starting sign-in process');
     setIsSigningIn(true);
-
     const provider = new GoogleAuthProvider();
     provider.addScope('profile');
     provider.addScope('email');
-    provider.setCustomParameters({
-      prompt: 'select_account'
-    });
+    provider.setCustomParameters({ prompt: 'select_account' });
 
-    console.log('[AuthContext] Google Auth Provider configured with scopes:', ['profile', 'email']);
+    const mobile = isMobileDevice();
+    console.log(`[AuthContext] Starting Google sign-in. Mobile: ${mobile}`);
 
-    const isMobile = isMobileDevice();
-    console.log(`[AuthContext] Device type determined: ${isMobile ? 'Mobile' : 'Desktop'}`);
-
-    // Log browser capabilities for mobile debugging
-    if (typeof window !== 'undefined') {
-      console.log('[AuthContext] Browser capabilities:', {
-        cookieEnabled: navigator.cookieEnabled,
-        onLine: navigator.onLine,
-        language: navigator.language,
-        languages: navigator.languages,
-        doNotTrack: navigator.doNotTrack,
-        hardwareConcurrency: navigator.hardwareConcurrency,
-        deviceMemory: (navigator as any).deviceMemory || 'unknown',
-        connection: (navigator as any).connection ? {
-          effectiveType: (navigator as any).connection.effectiveType,
-          downlink: (navigator as any).connection.downlink,
-          rtt: (navigator as any).connection.rtt
-        } : 'unknown',
-        storage: {
-          localStorage: !!window.localStorage,
-          sessionStorage: !!window.sessionStorage,
-          indexedDB: !!window.indexedDB
-        },
-        location: {
-          protocol: window.location.protocol,
-          host: window.location.host,
-          pathname: window.location.pathname
-        }
-      });
-    }
-
-    // For mobile devices, use redirect method directly as it's more reliable
-    if (isMobile) {
+    if (mobile) {
       try {
-        console.log("[AuthContext] Using signInWithRedirect for mobile device");
-        console.log('[AuthContext] About to call signInWithRedirect...');
-        
-        // Store sign-in state in localStorage to persist across redirects
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('hsaShield_signingIn', 'true');
-          localStorage.setItem('hsaShield_signInTimestamp', Date.now().toString());
-        }
-        
+        console.log("[AuthContext] Using signInWithRedirect for mobile.");
+        localStorage.setItem('hsaShield_signingIn', 'true');
+        localStorage.setItem('hsaShield_signInTimestamp', Date.now().toString());
         await signInWithRedirect(auth, provider);
-        
-        console.log('[AuthContext] signInWithRedirect call completed, redirect should be happening...');
-        // The redirect will happen, and the result will be handled in the useEffect
-        return;
+        // Redirect will occur, result handled by handleRedirectResult
       } catch (error: any) {
-        console.error("[AuthContext] Error during signInWithRedirect:", {
-          code: error.code,
-          message: error.message,
-          stack: error.stack,
-          customData: error.customData,
-          timestamp: new Date().toISOString(),
-          userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
-        });
-        
-        // Clear localStorage on error
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('hsaShield_signingIn');
-          localStorage.removeItem('hsaShield_signInTimestamp');
-        }
-        
+        console.error("[AuthContext] signInWithRedirect error:", error);
+        localStorage.removeItem('hsaShield_signingIn');
+        localStorage.removeItem('hsaShield_signInTimestamp');
         setIsSigningIn(false);
-        
-        toast({
-          variant: 'destructive',
-          title: "Sign-In Failed",
-          description: "Unable to start the sign-in process. Please try again.",
-          duration: 7000,
-        });
-        return;
+        toast({ variant: 'destructive', title: "Sign-In Failed", description: "Could not start sign-in. Please try again." });
       }
-    }
-
-    // For desktop devices, try popup first with fallback to redirect
-    try {
-      console.log("[AuthContext] Attempting signInWithPopup for desktop device");
-      console.log('[AuthContext] About to call signInWithPopup...');
-      
-      const result = await signInWithPopup(auth, provider);
-      
-      console.log("[AuthContext] Sign-in with popup successful:", {
-        user: {
-          uid: result.user.uid,
-          email: result.user.email,
-          displayName: result.user.displayName,
-          emailVerified: result.user.emailVerified
-        },
-        operationType: result.operationType,
-        timestamp: new Date().toISOString()
-      });
-      
-      setIsSigningIn(false);
-      // Successful sign-in will be handled by onAuthStateChanged
-    } catch (error: any) {
-      console.error("[AuthContext] Error during signInWithPopup:", {
-        code: error.code,
-        message: error.message,
-        stack: error.stack,
-        customData: error.customData,
-        timestamp: new Date().toISOString(),
-        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
-      });
-      
-      // If popup fails due to being closed by user or other popup-related issues, 
-      // fall back to redirect method
-      if (error.code === 'auth/popup-closed-by-user' || 
-          error.code === 'auth/cancelled-popup-request' ||
-          error.code === 'auth/popup-blocked') {
-        
-        console.log("[AuthContext] Popup failed, falling back to redirect method. Error details:", {
-          code: error.code,
-          reason: 'popup_blocked_or_closed'
-        });
-        
-        toast({
-          title: "Switching Sign-In Method",
-          description: "Popup was blocked or closed. Redirecting to Google sign-in page...",
-          duration: 3000,
-        });
-
-        try {
-          console.log('[AuthContext] Attempting fallback signInWithRedirect...');
-          await signInWithRedirect(auth, provider);
-          console.log('[AuthContext] Fallback signInWithRedirect call completed, redirect should be happening...');
-          // The redirect will happen, and the result will be handled in the useEffect
-          return;
-        } catch (redirectError: any) {
-          console.error("[AuthContext] Error during fallback signInWithRedirect:", {
-            code: redirectError.code,
-            message: redirectError.message,
-            stack: redirectError.stack,
-            customData: redirectError.customData,
-            timestamp: new Date().toISOString(),
-            originalError: error.code
-          });
-          
-          setIsSigningIn(false);
-          
-          toast({
-            variant: 'destructive',
-            title: "Sign-In Failed",
-            description: "Unable to complete sign-in. Please try again or contact support if the issue persists.",
-            duration: 10000,
-          });
+    } else { // Desktop
+      try {
+        console.log("[AuthContext] Using signInWithPopup for desktop.");
+        await signInWithPopup(auth, provider);
+        // onAuthStateChanged will handle user update and reset isSigningIn
+      } catch (error: any) {
+        console.error("[AuthContext] signInWithPopup error:", error);
+        setIsSigningIn(false);
+        if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+          toast({ title: "Sign-In Cancelled", description: "You closed the sign-in window. Please try again if you'd like to sign in." });
+        } else if (error.code === 'auth/popup-blocked') {
+          toast({ variant: 'destructive', title: "Popup Blocked", description: "Please allow popups for this site to sign in, or try a different browser." });
+        } else {
+          toast({ variant: 'destructive', title: "Sign-In Failed", description: "An error occurred. Please try again." });
         }
-      } else if (error.code === 'auth/unauthorized-domain') {
-        console.log('[AuthContext] Unauthorized domain error - configuration issue');
-        setIsSigningIn(false);
-        toast({
-          variant: 'destructive',
-          title: "Sign-In Configuration Issue",
-          description: "There seems to be a configuration problem with sign-in. Please contact support if this issue persists.",
-          duration: 10000,
-        });
-      } else {
-        console.log('[AuthContext] Unexpected error during popup sign-in:', error.code);
-        setIsSigningIn(false);
-        toast({
-          variant: 'destructive',
-          title: "Sign-In Failed",
-          description: "An unexpected error occurred while trying to sign you in. Please try again.",
-          duration: 7000,
-        });
       }
     }
   };
 
   const signOutUser = async () => {
-    console.log('[AuthContext] signOutUser called');
-    
     try {
-      console.log('[AuthContext] Attempting to sign out user');
       await signOut(auth);
-      console.log('[AuthContext] Sign out successful');
-      
-      // Navigation to home or login page can be handled by the layout/page components
-      // observing the currentUser state change.
-      // router.push('/'); 
+      // onAuthStateChanged will set currentUser to null
+      toast({ title: "Signed Out", description: "You have been successfully signed out." });
     } catch (error: any) {
-      console.error("[AuthContext] Error signing out:", {
-        code: error.code,
-        message: error.message,
-        stack: error.stack,
-        timestamp: new Date().toISOString(),
-        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'unknown'
-      });
-      
-      toast({
-        variant: 'destructive',
-        title: "Sign-Out Failed",
-        description: "An unexpected error occurred during sign-out. Please try again.",
-      });
+      console.error("[AuthContext] Sign out error:", error);
+      toast({ variant: 'destructive', title: "Sign-Out Error", description: "Could not sign out. Please try again." });
     }
   };
 
-  const value = {
-    currentUser,
-    loading,
-    signInWithGoogle,
-    signOutUser,
-    isSigningIn,
-  };
-
+  const value = { currentUser, loading, signInWithGoogle, signOutUser, isSigningIn };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
