@@ -15,18 +15,40 @@ import { auth } from '@/lib/firebase'; // Using the initialized auth instance fr
 import { useRouter } from 'next/navigation';
 import { toast } from "@/hooks/use-toast";
 
-// Utility function to detect mobile devices
+// Utility function to detect mobile devices with improved accuracy
 const isMobileDevice = (): boolean => {
   if (typeof window === 'undefined') return false;
   
   const userAgent = window.navigator.userAgent;
   const mobileRegex = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
   
+  // Check for mobile user agent
+  const isMobileUA = mobileRegex.test(userAgent);
+  
   // Also check for touch capability and screen size
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   const isSmallScreen = window.innerWidth <= 768;
   
-  return mobileRegex.test(userAgent) || (isTouchDevice && isSmallScreen);
+  // Check for specific mobile indicators
+  const hasCoarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const isMobileViewport = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+  
+  // More comprehensive mobile detection
+  const isMobile = isMobileUA || 
+                   (isTouchDevice && isSmallScreen) || 
+                   (hasCoarsePointer && isMobileViewport);
+  
+  console.log("[AuthContext] Mobile detection:", {
+    userAgent: userAgent.substring(0, 50) + "...",
+    isMobileUA,
+    isTouchDevice,
+    isSmallScreen,
+    hasCoarsePointer,
+    isMobileViewport,
+    finalResult: isMobile
+  });
+  
+  return isMobile;
 };
 
 interface AuthContextType {
@@ -43,14 +65,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
-  const router = useRouter(); 
+  const router = useRouter();
+
+  // Restore signing-in state on page load (important for mobile redirects)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const wasSigningIn = localStorage.getItem('hsashield_signing_in');
+      if (wasSigningIn) {
+        console.log("[AuthContext] Restoring signing-in state from localStorage");
+        setIsSigningIn(true);
+      }
+    }
+  }, []); 
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log("[AuthContext] Auth state changed:", user ? `User: ${user.email}` : "No user");
       setCurrentUser(user);
       setLoading(false);
       if (user) {
         setIsSigningIn(false); // Reset signing in state when user is authenticated
+        
+        // Clear any stored signing-in state when user is successfully authenticated
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('hsashield_signing_in');
+        }
       }
     });
     return () => {
@@ -58,19 +97,61 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
-  // Handle redirect result on component mount
+  // Handle redirect result on component mount with improved error handling and retry logic
   useEffect(() => {
+    let retryCount = 0;
+    const maxRetries = 3;
+    const retryDelay = 1000; // 1 second
+
     const handleRedirectResult = async () => {
       try {
+        console.log("[AuthContext] Checking for redirect result...");
         const result = await getRedirectResult(auth);
         if (result) {
           // User successfully signed in via redirect
-          console.log("[AuthContext] Sign-in via redirect successful");
+          console.log("[AuthContext] Sign-in via redirect successful", {
+            user: result.user.email,
+            providerId: result.providerId
+          });
           setIsSigningIn(false);
+          
+          // Clear any stored signing-in state
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('hsashield_signing_in');
+          }
+        } else {
+          console.log("[AuthContext] No redirect result found");
+          // Check if we were in the middle of signing in
+          if (typeof window !== 'undefined') {
+            const wasSigningIn = localStorage.getItem('hsashield_signing_in');
+            if (wasSigningIn) {
+              console.log("[AuthContext] Was signing in but no redirect result - clearing state");
+              localStorage.removeItem('hsashield_signing_in');
+              setIsSigningIn(false);
+            }
+          }
         }
       } catch (error: any) {
         console.error("[AuthContext] Error handling redirect result:", error.code, error.message);
+        
+        // Retry logic for transient errors
+        if (retryCount < maxRetries && (
+          error.code === 'auth/network-request-failed' ||
+          error.code === 'auth/timeout' ||
+          error.code === 'auth/internal-error'
+        )) {
+          retryCount++;
+          console.log(`[AuthContext] Retrying redirect result check (${retryCount}/${maxRetries}) in ${retryDelay}ms`);
+          setTimeout(handleRedirectResult, retryDelay);
+          return;
+        }
+        
         setIsSigningIn(false);
+        
+        // Clear any stored signing-in state
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('hsashield_signing_in');
+        }
         
         // Handle redirect-specific errors
         if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
@@ -79,6 +160,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             title: "Sign-In Interrupted",
             description: "The sign-in process was cancelled. Please try again.",
             duration: 7000,
+          });
+        } else if (error.code === 'auth/unauthorized-domain') {
+          toast({
+            variant: 'destructive',
+            title: "Configuration Error",
+            description: "This domain is not authorized for Google sign-in. Please contact support.",
+            duration: 10000,
           });
         } else {
           toast({
@@ -91,7 +179,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
-    handleRedirectResult();
+    // Add a small delay to ensure the page has fully loaded
+    const timer = setTimeout(handleRedirectResult, 100);
+    
+    return () => clearTimeout(timer);
   }, []);
 
   const signInWithGoogle = async () => {
@@ -113,6 +204,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     setIsSigningIn(true);
 
+    // Store signing-in state for mobile redirect persistence
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('hsashield_signing_in', 'true');
+    }
+
     const provider = new GoogleAuthProvider();
     provider.addScope('profile');
     provider.addScope('email');
@@ -127,12 +223,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (isMobile) {
       try {
         console.log("[AuthContext] Using signInWithRedirect for mobile device");
+        
+        // Add additional mobile-specific configuration
+        provider.setCustomParameters({
+          prompt: 'select_account',
+          // Force mobile-optimized flow
+          display: 'touch'
+        });
+        
         await signInWithRedirect(auth, provider);
         // The redirect will happen, and the result will be handled in the useEffect
+        // Note: setIsSigningIn(false) will be called in the redirect result handler
         return;
       } catch (error: any) {
         console.error("[AuthContext] Error during signInWithRedirect:", error.code, error.message);
         setIsSigningIn(false);
+        
+        // Clear stored state on error
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('hsashield_signing_in');
+        }
         
         toast({
           variant: 'destructive',
@@ -149,6 +259,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log("[AuthContext] Attempting signInWithPopup for desktop device");
       await signInWithPopup(auth, provider);
       setIsSigningIn(false);
+      
+      // Clear stored state on success
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('hsashield_signing_in');
+      }
+      
       console.log("[AuthContext] Sign-in with popup successful");
       // Successful sign-in will be handled by onAuthStateChanged
     } catch (error: any) {
@@ -171,10 +287,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         try {
           await signInWithRedirect(auth, provider);
           // The redirect will happen, and the result will be handled in the useEffect
+          // Note: setIsSigningIn(false) will be called in the redirect result handler
           return;
         } catch (redirectError: any) {
           console.error("[AuthContext] Error during fallback signInWithRedirect:", redirectError.code, redirectError.message);
           setIsSigningIn(false);
+          
+          // Clear stored state on error
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('hsashield_signing_in');
+          }
           
           toast({
             variant: 'destructive',
@@ -185,6 +307,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
       } else if (error.code === 'auth/unauthorized-domain') {
         setIsSigningIn(false);
+        
+        // Clear stored state on error
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('hsashield_signing_in');
+        }
+        
         toast({
           variant: 'destructive',
           title: "Sign-In Configuration Issue",
@@ -193,6 +321,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         });
       } else {
         setIsSigningIn(false);
+        
+        // Clear stored state on error
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('hsashield_signing_in');
+        }
+        
         toast({
           variant: 'destructive',
           title: "Sign-In Failed",
