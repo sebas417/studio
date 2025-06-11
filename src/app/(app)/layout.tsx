@@ -30,18 +30,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LogIn, LogOut } from 'lucide-react';
+import { LogOut, LogIn } from 'lucide-react'; // LogIn still used for the new Sign In button
 import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from '@/components/ui/skeleton';
 
 function UserNav() {
-  const { currentUser, loading, signInWithGoogle, signOutUser, isSigningIn } = useAuth();
+  const { currentUser, loading, signOutUser, isSigningIn } = useAuth(); // Removed signInWithGoogle
   const router = useRouter();
-
-  const handleSignIn = () => {
-    console.log("[UserNav] Sign in button CLICKED. Calling signInWithGoogle..."); // New log
-    signInWithGoogle();
-  };
 
   if (loading) {
     return (
@@ -54,18 +49,9 @@ function UserNav() {
 
   if (!currentUser) {
     return (
-      <Button onClick={handleSignIn} variant="outline" disabled={isSigningIn}>
-        {isSigningIn ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Signing in...
-          </>
-        ) : (
-          <>
-            <LogIn className="mr-2 h-4 w-4" />
-            Sign in with Google
-          </>
-        )}
+      <Button onClick={() => router.push('/')} variant="outline" disabled={isSigningIn}>
+        <LogIn className="mr-2 h-4 w-4" />
+        Sign In
       </Button>
     );
   }
@@ -87,15 +73,17 @@ function UserNav() {
       <DropdownMenuContent className="w-56" align="end" forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">{currentUser.displayName || "User"}</p>
-            <p className="text-xs leading-none text-muted-foreground">
-              {currentUser.email}
-            </p>
+            <p className="text-sm font-medium leading-none">{currentUser.displayName || currentUser.email?.split('@')[0] || "User"}</p>
+            {currentUser.email && (
+              <p className="text-xs leading-none text-muted-foreground">
+                {currentUser.email}
+              </p>
+            )}
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={signOutUser}>
-          <LogOut className="mr-2 h-4 w-4" />
+        <DropdownMenuItem onClick={signOutUser} disabled={isSigningIn}>
+          {isSigningIn && currentUser ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
           <span>Log out</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -174,13 +162,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     if (!loading && !currentUser && pathname !== '/') {
-      // The UserNav component handles the sign-in prompt.
-      // If the user is not logged in and not on the public landing page,
-      // the main content area will show a "Please sign in" message.
+      // User is not on the public landing/login page, and not logged in.
+      // The UserNav now provides a "Sign In" button that links to '/',
+      // and the content area below will show a "Please sign in" message.
     }
   }, [loading, currentUser, router, pathname]);
 
-  if (loading) {
+  if (loading && !currentUser) { // Show full page loader only if initial load and no user
      return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -200,8 +188,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background/80 backdrop-blur-sm px-6">
             <div className="flex items-center gap-2">
                {currentUser && <SidebarTrigger className="md:hidden" />}
-               <h1 className="text-xl font-semibold tracking-tight">
-               </h1>
+               {/* Removed the page title from header to keep it clean, could be added back if needed */}
             </div>
             <UserNav />
           </header>
@@ -210,7 +197,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="flex flex-col items-center justify-center h-full text-center">
                 <AppLogo />
                 <p className="mt-4 text-lg text-muted-foreground">Please sign in to continue.</p>
-                {/* UserNav in the header provides the sign-in button */}
+                {/* The UserNav in the header or the root page itself provides the sign-in mechanism */}
               </div>
             )}
           </main>

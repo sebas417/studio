@@ -4,81 +4,21 @@
 import React, { createContext, useState, useEffect, useContext, type ReactNode } from 'react';
 import { 
   onAuthStateChanged, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
   signOut, 
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
   type User 
 } from 'firebase/auth';
 import { auth, app as firebaseApp } from '@/lib/firebase';
 import { toast } from "@/hooks/use-toast";
 
-// Helper function to determine if it's a mobile device (can still be used for logging or other UI hints if needed)
-const isMobileDevice = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-         ('ontouchstart' in window || navigator.maxTouchPoints > 0) && window.screen.width <= 768;
-};
-
-const getDeviceDetails = (): Record<string, any> => {
-  if (typeof window === 'undefined') return { userAgent: "SSR" };
-  const { navigator, screen, visualViewport } = window;
-  return {
-    userAgent: navigator.userAgent,
-    isMobileUA: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
-    isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
-    isSmallScreen: screen.width <= 768,
-    screenWidth: screen.width,
-    screenHeight: screen.height,
-    viewportWidth: visualViewport?.width,
-    viewportHeight: visualViewport?.height,
-    devicePixelRatio: window.devicePixelRatio,
-    platform: navigator.platform,
-    vendor: navigator.vendor,
-    maxTouchPoints: navigator.maxTouchPoints,
-  };
-};
-
-const getBrowserCapabilities = (): Record<string, any> => {
-  if (typeof window === 'undefined') return { environment: "SSR" };
-  const { navigator, localStorage, sessionStorage, document, indexedDB } = window;
-  let connectionDetails = {};
-  if ('connection' in navigator) {
-    const conn = navigator.connection as any;
-    connectionDetails = {
-      effectiveType: conn?.effectiveType,
-      rtt: conn?.rtt,
-      downlink: conn?.downlink,
-      saveData: conn?.saveData,
-    };
-  }
-  return {
-    cookieEnabled: navigator.cookieEnabled,
-    onLine: navigator.onLine,
-    language: navigator.language,
-    languages: navigator.languages,
-    doNotTrack: navigator.doNotTrack,
-    hardwareConcurrency: navigator.hardwareConcurrency,
-    deviceMemory: (navigator as any).deviceMemory,
-    storage: {
-      localStorage: !!localStorage,
-      sessionStorage: !!sessionStorage,
-      indexedDB: !!indexedDB,
-    },
-    location: {
-      protocol: document.location.protocol,
-      host: document.location.host,
-      pathname: document.location.pathname,
-    },
-    connection: connectionDetails,
-  };
-};
-
 interface AuthContextType {
   currentUser: User | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
+  isSigningIn: boolean; // General flag for any auth operation in progress
+  signUpWithEmailPassword: (email: string, password: string) => Promise<boolean>;
+  signInWithEmailPassword: (email: string, password: string) => Promise<boolean>;
   signOutUser: () => Promise<void>;
-  isSigningIn: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -86,12 +26,11 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isSigningIn, setIsSigningIn] = useState(false); // Simplified: no pending redirect state
+  const [isSigningIn, setIsSigningIn] = useState(false);
   
   useEffect(() => {
     console.log('[AuthContext] AuthProvider initialized', { timestamp: new Date().toISOString(), isClient: typeof window !== 'undefined' });
     console.log('[AuthContext] Firebase App Name:', firebaseApp.name, 'Auth Domain:', auth.config.authDomain);
-    console.log('[AuthContext] Device Details:', getDeviceDetails());
   }, []);
 
   useEffect(() => {
@@ -108,9 +47,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       setCurrentUser(user);
       setLoading(false);
+      setIsSigningIn(false); // Reset signing in flag whenever auth state changes
       if (user) {
-        setIsSigningIn(false); 
-        console.log('[AuthContext] User authenticated, isSigningIn set to false.');
+        console.log('[AuthContext] User authenticated.');
       } else {
         console.log('[AuthContext] User signed out or not authenticated.');
       }
@@ -122,85 +61,94 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
-  const signInWithGoogle = async () => {
-    console.log("[AuthContext] signInWithGoogle (popup) initiated.");
+  const signUpWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
+    console.log("[AuthContext] signUpWithEmailPassword initiated.");
     if (!auth) {
-      console.error("[AuthContext] Firebase auth instance is not available for sign-in.");
-      toast({ variant: 'destructive', title: "Sign-In Error", description: "Authentication service unavailable. Please refresh." });
-      return;
-    }
-    if (currentUser) {
-      console.log("[AuthContext] User already signed in. Aborting new sign-in.");
-      return; 
+      console.error("[AuthContext] Firebase auth instance is not available.");
+      toast({ variant: 'destructive', title: "Sign-Up Error", description: "Authentication service unavailable. Please refresh." });
+      return false;
     }
     if (isSigningIn) {
-      console.log("[AuthContext] Sign-in already in progress. Aborting new sign-in.");
-      toast({ title: "Sign-In In Progress", description: "Please wait..."});
-      return;
+      toast({ title: "Processing...", description: "An authentication process is already underway." });
+      return false;
     }
 
     setIsSigningIn(true);
-    const provider = new GoogleAuthProvider();
-    provider.addScope('profile');
-    provider.addScope('email');
-    provider.setCustomParameters({ prompt: 'select_account' });
-
-    console.log("[AuthContext] Browser Capabilities at sign-in attempt:", getBrowserCapabilities());
-      
     try {
-      console.log("[AuthContext] Attempting signInWithPopup...");
-      await signInWithPopup(auth, provider);
+      await createUserWithEmailAndPassword(auth, email, password);
       // onAuthStateChanged will handle setCurrentUser and setting isSigningIn to false.
-      toast({ title: "Sign-In Successful!", description: "Welcome!" });
+      toast({ title: "Sign-Up Successful!", description: "Welcome! Your account has been created." });
+      return true;
     } catch (error: any) {
-      console.error("[AuthContext] signInWithPopup error:", {code: error.code, message: error.message});
-      setIsSigningIn(false); // Crucial: reset on error
-      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
-        toast({ 
-          variant: 'destructive', 
-          title: "Sign-In Cancelled", 
-          description: "The sign-in window was closed. If this was not intentional, please ensure popups are allowed and try again." 
-        });
-      } else if (error.code === 'auth/popup-blocked') {
-        toast({ 
-          variant: 'destructive', 
-          title: "Popup Blocked", 
-          description: "Your browser blocked the sign-in popup. Please allow popups for this site and try again." 
-        });
-      } else if (error.code === 'auth/unauthorized-domain') {
-         toast({ 
-           variant: 'destructive', 
-           title: "Sign-In Error", 
-           description: "This website is not authorized for sign-in with Google. Please contact support if this issue persists."
-         });
-      } else {
-        toast({ 
-          variant: 'destructive', 
-          title: "Sign-In Failed", 
-          description: "An unexpected error occurred. Please try again. If the problem continues, check your internet connection and browser settings." 
-        });
+      console.error("[AuthContext] signUpWithEmailPassword error:", {code: error.code, message: error.message});
+      let description = "An unexpected error occurred. Please try again.";
+      if (error.code === 'auth/email-already-in-use') {
+        description = "This email address is already in use. Please try signing in or use a different email.";
+      } else if (error.code === 'auth/invalid-email') {
+        description = "The email address is not valid. Please check and try again.";
+      } else if (error.code === 'auth/weak-password') {
+        description = "The password is too weak. Please choose a stronger password (at least 6 characters).";
       }
+      toast({ variant: 'destructive', title: "Sign-Up Failed", description });
+      setIsSigningIn(false);
+      return false;
+    }
+  };
+
+  const signInWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
+    console.log("[AuthContext] signInWithEmailPassword initiated.");
+    if (!auth) {
+      console.error("[AuthContext] Firebase auth instance is not available.");
+      toast({ variant: 'destructive', title: "Sign-In Error", description: "Authentication service unavailable. Please refresh." });
+      return false;
+    }
+     if (isSigningIn) {
+      toast({ title: "Processing...", description: "An authentication process is already underway." });
+      return false;
+    }
+
+    setIsSigningIn(true);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged will handle setCurrentUser and setting isSigningIn to false.
+      toast({ title: "Sign-In Successful!", description: "Welcome back!" });
+      return true;
+    } catch (error: any) {
+      console.error("[AuthContext] signInWithEmailPassword error:", {code: error.code, message: error.message});
+      let description = "An unexpected error occurred. Please try again.";
+      if (error.code === 'auth/invalid-email' || error.code === 'auth/invalid-credential') {
+        description = "Invalid email or password. Please check your credentials and try again.";
+      } else if (error.code === 'auth/user-disabled') {
+         description = "This account has been disabled. Please contact support.";
+      }
+      toast({ variant: 'destructive', title: "Sign-In Failed", description });
+      setIsSigningIn(false);
+      return false;
     }
   };
 
   const signOutUser = async () => {
     console.log("[AuthContext] signOutUser initiated.");
+    setIsSigningIn(true); // Indicate an auth operation is in progress
     try {
       await signOut(auth);
       toast({ title: "Signed Out", description: "You have been successfully signed out." });
-      // onAuthStateChanged will set currentUser to null and isSigningIn to false.
+      // onAuthStateChanged will set currentUser to null. setIsSigningIn(false) is handled there.
     } catch (error: any) {
       console.error("[AuthContext] Sign out error:", {code: error.code, message: error.message});
       toast({ variant: 'destructive', title: "Sign-Out Error", description: "Could not sign you out. Please try again." });
+      setIsSigningIn(false); // Explicitly reset if signOut fails before onAuthStateChanged does
     }
   };
 
-  const value = { currentUser, loading, signInWithGoogle, signOutUser, isSigningIn };
-
-  if (typeof window !== 'undefined') {
-    (window as any).hsaAuthContextDebug = value; 
-    (window as any).hsaAuthInstanceDebug = auth;
-  }
+  const value: AuthContextType = { 
+    currentUser, 
+    loading, 
+    isSigningIn,
+    signUpWithEmailPassword,
+    signInWithEmailPassword,
+    signOutUser, 
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

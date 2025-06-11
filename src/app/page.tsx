@@ -1,42 +1,42 @@
 
-"use client"; // Make this a client component to use hooks
+"use client";
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppLogo } from '@/components/AppLogo';
 import { Button } from '@/components/ui/button';
-import { LogIn } from 'lucide-react';
-
-// Helper for loading spinner
-const Loader2 = ({ className, ...props }: React.ComponentProps<typeof LogIn>) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="24"
-    height="24"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className} // Removed animate-spin here, apply it where used
-    {...props}
-  >
-    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-  </svg>
-);
-
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2 } from 'lucide-react'; // Re-using existing Loader2
 
 export default function RootPage() {
-  const { currentUser, loading, signInWithGoogle, isSigningIn } = useAuth();
+  const { currentUser, loading, signUpWithEmailPassword, signInWithEmailPassword, isSigningIn } = useAuth();
   const router = useRouter();
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false); // To toggle between Sign In and Sign Up form
 
   useEffect(() => {
     if (!loading && currentUser) {
-      router.replace('/dashboard'); // Use replace to avoid back button to this page
+      router.replace('/dashboard');
     }
   }, [currentUser, loading, router]);
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (isSigningIn) return;
+
+    let success = false;
+    if (isSignUp) {
+      success = await signUpWithEmailPassword(email, password);
+    } else {
+      success = await signInWithEmailPassword(email, password);
+    }
+    // If successful, useEffect will redirect. If not, toast is shown by AuthContext.
+  };
 
   if (loading) {
     return (
@@ -50,36 +50,62 @@ export default function RootPage() {
 
   if (!currentUser) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6 text-center">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
         <AppLogo />
-        <h1 className="mt-8 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-          Welcome to HSA Shield
-        </h1>
-        <p className="mt-4 text-lg text-muted-foreground">
-          Track your HSA expenses with ease. Scan receipts, manage reimbursements, and stay organized.
-        </p>
-        <Button 
-          onClick={signInWithGoogle} 
-          size="lg" 
-          className="mt-8" 
-          disabled={isSigningIn}
-        >
-          {isSigningIn ? (
-            <>
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              Signing in...
-            </>
-          ) : (
-            <>
-              <LogIn className="mr-2 h-5 w-5" />
-              Sign in with Google to Get Started
-            </>
-          )}
-        </Button>
+        <Card className="w-full max-w-sm mt-8">
+          <CardHeader>
+            <CardTitle className="text-2xl">{isSignUp ? 'Create Account' : 'Sign In'}</CardTitle>
+            <CardDescription>
+              {isSignUp ? 'Enter your email and password to create an account.' : 'Enter your credentials to access your account.'}
+            </CardDescription>
+          </CardHeader>
+          <form onSubmit={handleSubmit}>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="m@example.com"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={isSigningIn}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={isSigningIn}
+                  minLength={isSignUp ? 6 : undefined} // Enforce minLength for signup
+                />
+              </div>
+            </CardContent>
+            <CardFooter className="flex flex-col gap-4">
+              <Button type="submit" className="w-full" disabled={isSigningIn}>
+                {isSigningIn && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isSignUp ? 'Sign Up' : 'Sign In'}
+              </Button>
+              <Button
+                type="button"
+                variant="link"
+                onClick={() => setIsSignUp(!isSignUp)}
+                disabled={isSigningIn}
+              >
+                {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+              </Button>
+            </CardFooter>
+          </form>
+        </Card>
       </div>
     );
   }
 
-  // This part should ideally not be reached if redirect works correctly
+  // This part should ideally not be reached if redirect works correctly (or currentUser exists)
   return null; 
 }
