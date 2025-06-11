@@ -30,7 +30,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   
   useEffect(() => {
     // console.log('[AuthContext] AuthProvider initialized', { timestamp: new Date().toISOString(), isClient: typeof window !== 'undefined' });
-    // console.log('[AuthContext] Firebase App Name:', firebaseApp.name, 'Auth Domain:', auth.config.authDomain);
+    // console.log('[AuthContext] Firebase App Name:', firebaseApp.name, 'Auth Domain:', auth?.config?.authDomain || "Auth not fully initialized");
   }, []);
 
   useEffect(() => {
@@ -64,13 +64,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signUpWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
     if (!auth) {
       console.error("[AuthContext] Firebase auth instance is not available for signUp.");
-      toast({ variant: 'destructive', title: "Sign-Up Error", description: "Authentication service unavailable. Please refresh." });
+      toast({ variant: 'destructive', title: "Sign-Up Error", description: "Authentication service unavailable. Please refresh and try again." });
       setIsSigningIn(false);
       return false;
     }
     if (isSigningIn) {
-      toast({ title: "Processing...", description: "An authentication attempt is already in progress." });
-      return false;
+      // toast({ title: "Processing...", description: "An authentication attempt is already in progress." });
+      return false; // Silently prevent multiple submissions
     }
 
     setIsSigningIn(true);
@@ -83,6 +83,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("[AuthContext] signUpWithEmailPassword raw error object:", error);
       const errorCode = error?.code;
       const errorMessage = error?.message;
+      // The console.error below is for debugging, it's okay if it shows empty for non-Firebase errors
       console.error("[AuthContext] signUpWithEmailPassword extracted details:", { code: errorCode, message: errorMessage });
 
       let description = "An unexpected sign-up error occurred. Please try again.";
@@ -93,7 +94,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else if (errorCode === 'auth/weak-password') {
         description = "The password is too weak. Please choose a stronger password (at least 6 characters).";
       } else if (errorMessage) {
-        description = `Sign-up failed: ${errorMessage}`; // More generic if code isn't recognized
+        description = `Sign-up failed: ${errorMessage}`;
       }
       toast({ variant: 'destructive', title: "Sign-Up Failed", description });
       setIsSigningIn(false);
@@ -104,13 +105,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signInWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
     if (!auth) {
       console.error("[AuthContext] Firebase auth instance is not available for signIn.");
-      toast({ variant: 'destructive', title: "Sign-In Error", description: "Authentication service unavailable. Please refresh." });
+      toast({ variant: 'destructive', title: "Sign-In Error", description: "Authentication service unavailable. Please refresh and try again." });
       setIsSigningIn(false);
       return false;
     }
      if (isSigningIn) {
-      toast({ title: "Processing...", description: "An authentication attempt is already in progress." });
-      return false;
+      // toast({ title: "Processing...", description: "An authentication attempt is already in progress." });
+      return false; // Silently prevent multiple submissions
     }
 
     setIsSigningIn(true);
@@ -123,6 +124,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("[AuthContext] signInWithEmailPassword raw error object:", error);
       const errorCode = error?.code;
       const errorMessage = error?.message;
+      // The console.error below is for debugging
       console.error("[AuthContext] signInWithEmailPassword extracted details:", { code: errorCode, message: errorMessage });
 
       let description = "An unexpected sign-in error occurred. Please try again.";
@@ -131,7 +133,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else if (errorCode === 'auth/user-disabled') {
          description = "This account has been disabled. Please contact support.";
       } else if (errorMessage) {
-        description = `Sign-in failed: ${errorMessage}`; // More generic if code isn't recognized
+        description = `Sign-in failed: ${errorMessage}`;
       }
       toast({ variant: 'destructive', title: "Sign-In Failed", description });
       setIsSigningIn(false);
@@ -140,10 +142,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOutUser = async () => {
+    if (!auth) {
+      console.error("[AuthContext] Firebase auth instance is not available for signOut.");
+      toast({ variant: 'destructive', title: "Sign-Out Error", description: "Authentication service unavailable." });
+      return;
+    }
     setIsSigningIn(true); 
     try {
       await signOut(auth);
       toast({ title: "Signed Out", description: "You have been successfully signed out." });
+      // onAuthStateChanged will set isSigningIn to false
     } catch (error: any) {
       console.error("[AuthContext] Sign out raw error object:", error);
       const errorCode = error?.code;
