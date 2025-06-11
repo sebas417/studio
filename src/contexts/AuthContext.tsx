@@ -15,7 +15,7 @@ import { toast } from "@/hooks/use-toast";
 interface AuthContextType {
   currentUser: User | null;
   loading: boolean;
-  isSigningIn: boolean; // General flag for any auth operation in progress
+  isSigningIn: boolean; 
   signUpWithEmailPassword: (email: string, password: string) => Promise<boolean>;
   signInWithEmailPassword: (email: string, password: string) => Promise<boolean>;
   signOutUser: () => Promise<void>;
@@ -29,65 +29,71 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isSigningIn, setIsSigningIn] = useState(false);
   
   useEffect(() => {
-    console.log('[AuthContext] AuthProvider initialized', { timestamp: new Date().toISOString(), isClient: typeof window !== 'undefined' });
-    console.log('[AuthContext] Firebase App Name:', firebaseApp.name, 'Auth Domain:', auth.config.authDomain);
+    // console.log('[AuthContext] AuthProvider initialized', { timestamp: new Date().toISOString(), isClient: typeof window !== 'undefined' });
+    // console.log('[AuthContext] Firebase App Name:', firebaseApp.name, 'Auth Domain:', auth.config.authDomain);
   }, []);
 
   useEffect(() => {
-    console.log('[AuthContext] Setting up Firebase onAuthStateChanged listener.');
+    // console.log('[AuthContext] Setting up Firebase onAuthStateChanged listener.');
     
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      const authStateLog = {
-        hasUser: !!user,
-        userId: user?.uid || null,
-        email: user?.email || null,
-        timestamp: new Date().toISOString(),
-      };
-      console.log('[AuthContext] Firebase onAuthStateChanged event.', authStateLog);
+      // const authStateLog = {
+      //   hasUser: !!user,
+      //   userId: user?.uid || null,
+      //   email: user?.email || null,
+      //   timestamp: new Date().toISOString(),
+      // };
+      // console.log('[AuthContext] Firebase onAuthStateChanged event.', authStateLog);
 
       setCurrentUser(user);
       setLoading(false);
-      setIsSigningIn(false); // Reset signing in flag whenever auth state changes
-      if (user) {
-        console.log('[AuthContext] User authenticated.');
-      } else {
-        console.log('[AuthContext] User signed out or not authenticated.');
-      }
+      setIsSigningIn(false); 
+      // if (user) {
+      //   console.log('[AuthContext] User authenticated.');
+      // } else {
+      //   console.log('[AuthContext] User signed out or not authenticated.');
+      // }
     });
     
     return () => { 
-      console.log('[AuthContext] Cleaning up Firebase onAuthStateChanged listener.');
+      // console.log('[AuthContext] Cleaning up Firebase onAuthStateChanged listener.');
       unsubscribe();
     };
   }, []);
 
   const signUpWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
-    console.log("[AuthContext] signUpWithEmailPassword initiated.");
     if (!auth) {
-      console.error("[AuthContext] Firebase auth instance is not available.");
+      console.error("[AuthContext] Firebase auth instance is not available for signUp.");
       toast({ variant: 'destructive', title: "Sign-Up Error", description: "Authentication service unavailable. Please refresh." });
+      setIsSigningIn(false);
       return false;
     }
     if (isSigningIn) {
-      toast({ title: "Processing...", description: "An authentication process is already underway." });
+      toast({ title: "Processing...", description: "An authentication attempt is already in progress." });
       return false;
     }
 
     setIsSigningIn(true);
     try {
       await createUserWithEmailAndPassword(auth, email, password);
-      // onAuthStateChanged will handle setCurrentUser and setting isSigningIn to false.
       toast({ title: "Sign-Up Successful!", description: "Welcome! Your account has been created." });
+      // onAuthStateChanged will handle setCurrentUser and setting isSigningIn to false.
       return true;
     } catch (error: any) {
-      console.error("[AuthContext] signUpWithEmailPassword error:", {code: error.code, message: error.message});
-      let description = "An unexpected error occurred. Please try again.";
-      if (error.code === 'auth/email-already-in-use') {
+      console.error("[AuthContext] signUpWithEmailPassword raw error object:", error);
+      const errorCode = error?.code;
+      const errorMessage = error?.message;
+      console.error("[AuthContext] signUpWithEmailPassword extracted details:", { code: errorCode, message: errorMessage });
+
+      let description = "An unexpected sign-up error occurred. Please try again.";
+      if (errorCode === 'auth/email-already-in-use') {
         description = "This email address is already in use. Please try signing in or use a different email.";
-      } else if (error.code === 'auth/invalid-email') {
+      } else if (errorCode === 'auth/invalid-email') {
         description = "The email address is not valid. Please check and try again.";
-      } else if (error.code === 'auth/weak-password') {
+      } else if (errorCode === 'auth/weak-password') {
         description = "The password is too weak. Please choose a stronger password (at least 6 characters).";
+      } else if (errorMessage) {
+        description = `Sign-up failed: ${errorMessage}`; // More generic if code isn't recognized
       }
       toast({ variant: 'destructive', title: "Sign-Up Failed", description });
       setIsSigningIn(false);
@@ -96,30 +102,36 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signInWithEmailPassword = async (email: string, password: string): Promise<boolean> => {
-    console.log("[AuthContext] signInWithEmailPassword initiated.");
     if (!auth) {
-      console.error("[AuthContext] Firebase auth instance is not available.");
+      console.error("[AuthContext] Firebase auth instance is not available for signIn.");
       toast({ variant: 'destructive', title: "Sign-In Error", description: "Authentication service unavailable. Please refresh." });
+      setIsSigningIn(false);
       return false;
     }
      if (isSigningIn) {
-      toast({ title: "Processing...", description: "An authentication process is already underway." });
+      toast({ title: "Processing...", description: "An authentication attempt is already in progress." });
       return false;
     }
 
     setIsSigningIn(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // onAuthStateChanged will handle setCurrentUser and setting isSigningIn to false.
       toast({ title: "Sign-In Successful!", description: "Welcome back!" });
+      // onAuthStateChanged will handle setCurrentUser and setting isSigningIn to false.
       return true;
     } catch (error: any) {
-      console.error("[AuthContext] signInWithEmailPassword error:", {code: error.code, message: error.message});
-      let description = "An unexpected error occurred. Please try again.";
-      if (error.code === 'auth/invalid-email' || error.code === 'auth/invalid-credential') {
+      console.error("[AuthContext] signInWithEmailPassword raw error object:", error);
+      const errorCode = error?.code;
+      const errorMessage = error?.message;
+      console.error("[AuthContext] signInWithEmailPassword extracted details:", { code: errorCode, message: errorMessage });
+
+      let description = "An unexpected sign-in error occurred. Please try again.";
+      if (errorCode === 'auth/invalid-email' || errorCode === 'auth/invalid-credential' || errorCode === 'auth/user-not-found' || errorCode === 'auth/wrong-password') {
         description = "Invalid email or password. Please check your credentials and try again.";
-      } else if (error.code === 'auth/user-disabled') {
+      } else if (errorCode === 'auth/user-disabled') {
          description = "This account has been disabled. Please contact support.";
+      } else if (errorMessage) {
+        description = `Sign-in failed: ${errorMessage}`; // More generic if code isn't recognized
       }
       toast({ variant: 'destructive', title: "Sign-In Failed", description });
       setIsSigningIn(false);
@@ -128,16 +140,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOutUser = async () => {
-    console.log("[AuthContext] signOutUser initiated.");
-    setIsSigningIn(true); // Indicate an auth operation is in progress
+    setIsSigningIn(true); 
     try {
       await signOut(auth);
       toast({ title: "Signed Out", description: "You have been successfully signed out." });
-      // onAuthStateChanged will set currentUser to null. setIsSigningIn(false) is handled there.
     } catch (error: any) {
-      console.error("[AuthContext] Sign out error:", {code: error.code, message: error.message});
-      toast({ variant: 'destructive', title: "Sign-Out Error", description: "Could not sign you out. Please try again." });
-      setIsSigningIn(false); // Explicitly reset if signOut fails before onAuthStateChanged does
+      console.error("[AuthContext] Sign out raw error object:", error);
+      const errorCode = error?.code;
+      const errorMessage = error?.message;
+      console.error("[AuthContext] Sign out extracted details:", { code: errorCode, message: errorMessage });
+      toast({ variant: 'destructive', title: "Sign-Out Error", description: errorMessage || "Could not sign you out. Please try again." });
+      setIsSigningIn(false); 
     }
   };
 
