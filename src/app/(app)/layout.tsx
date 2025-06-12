@@ -35,13 +35,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from '@/components/ui/skeleton';
 
 function UserNav() {
-  const { currentUser, loading, signInWithGoogle, signOutUser } = useAuth();
+  const { currentUser, loading, signOutUser } = useAuth();
   const router = useRouter();
-
-  const handleSignIn = () => {
-    console.log("[UserNav] Sign in button CLICKED. Calling signInWithGoogle..."); // New log
-    signInWithGoogle();
-  };
 
   if (loading) {
     return (
@@ -53,12 +48,9 @@ function UserNav() {
   }
 
   if (!currentUser) {
-    return (
-      <Button onClick={handleSignIn} variant="outline">
-        <LogIn className="mr-2 h-4 w-4" />
-        Sign in with Google
-      </Button>
-    );
+    // Redirect to main page for authentication
+    router.push('/');
+    return null;
   }
 
   return (
@@ -164,12 +156,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   React.useEffect(() => {
-    if (!loading && !currentUser && pathname !== '/') {
-      // The UserNav component handles the sign-in prompt.
-      // If the user is not logged in and not on the public landing page,
-      // the main content area will show a "Please sign in" message.
+    if (!loading && !currentUser) {
+      // Redirect unauthenticated users to the main page
+      router.push('/');
     }
-  }, [loading, currentUser, router, pathname]);
+  }, [loading, currentUser, router]);
 
   if (loading) {
      return (
@@ -197,13 +188,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <UserNav />
           </header>
           <main className="flex-1 overflow-y-auto p-6">
-            {currentUser ? children : (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <AppLogo />
-                <p className="mt-4 text-lg text-muted-foreground">Please sign in to continue.</p>
-                {/* UserNav in the header provides the sign-in button */}
-              </div>
-            )}
+            {children}
           </main>
         </div>
       </div>
@@ -212,7 +197,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 // Helper for loading spinner
-const Loader2 = ({ className, ...props }: React.ComponentProps<typeof LogIn>) => (
+const Loader2 = ({ className, ...props }: { className?: string; [key: string]: any }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="24"

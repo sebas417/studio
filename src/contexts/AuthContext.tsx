@@ -2,7 +2,7 @@
 "use client";
 
 import React, { createContext, useState, useEffect, useContext, type ReactNode } from 'react';
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, type User } from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, type User } from 'firebase/auth';
 import { auth } from '@/lib/firebase'; // Using the initialized auth instance from our firebase lib
 import { useRouter } from 'next/navigation';
 import { toast } from "@/hooks/use-toast";
@@ -10,7 +10,8 @@ import { toast } from "@/hooks/use-toast";
 interface AuthContextType {
   currentUser: User | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string) => Promise<void>;
   signOutUser: () => Promise<void>;
 }
 
@@ -31,7 +32,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
-  const signInWithGoogle = async () => {
+  const signInWithEmail = async (email: string, password: string) => {
     if (!auth) {
       console.error("[AuthContext] Firebase auth instance from '@/lib/firebase' is not available.");
       toast({
@@ -43,46 +44,74 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    const provider = new GoogleAuthProvider();
-    provider.addScope('profile');
-    provider.addScope('email');
-    provider.setCustomParameters({
-      prompt: 'select_account'
-    });
-    
     try {
-      await signInWithPopup(auth, provider);
+      await signInWithEmailAndPassword(auth, email, password);
       // Successful sign-in will be handled by onAuthStateChanged
-      // User will be redirected by logic in page.tsx or layout.tsx based on currentUser state
     } catch (error: any) {
-      console.error("[AuthContext] Error during signInWithPopup: ", error.code, error.message);
+      console.error("[AuthContext] Error during signInWithEmailAndPassword: ", error.code, error.message);
       
-      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
-        toast({
-          variant: 'destructive',
-          title: "Sign-In Interrupted",
-          description: "The sign-in process didn't complete. This can sometimes happen due to browser settings or if the window was closed prematurely. Please try again. If the issue persists, try clearing browser cookies.",
-          duration: 10000,
-        });
-      } else if (error.code === 'auth/unauthorized-domain') {
-        // This error is primarily for the developer during setup.
-        // A user ideally shouldn't see this if the app is correctly configured.
-        // We'll show a generic error to the user for other cases.
-         toast({
-          variant: 'destructive',
-          title: "Sign-In Configuration Issue",
-          description: "There seems to be a configuration problem with sign-in. Please contact support if this issue persists.",
-          duration: 10000,
-        });
+      let errorMessage = "An unexpected error occurred while trying to sign you in. Please try again.";
+      
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = "No account found with this email address. Please check your email or sign up for a new account.";
+      } else if (error.code === 'auth/wrong-password') {
+        errorMessage = "Incorrect password. Please try again.";
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "Please enter a valid email address.";
+      } else if (error.code === 'auth/user-disabled') {
+        errorMessage = "This account has been disabled. Please contact support.";
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = "Too many failed attempts. Please try again later.";
       }
-      else {
-        toast({
-          variant: 'destructive',
-          title: "Sign-In Failed",
-          description: "An unexpected error occurred while trying to sign you in. Please try again.",
-          duration: 7000,
-        });
+      
+      toast({
+        variant: 'destructive',
+        title: "Sign-In Failed",
+        description: errorMessage,
+        duration: 7000,
+      });
+    }
+  };
+
+  const signUpWithEmail = async (email: string, password: string) => {
+    if (!auth) {
+      console.error("[AuthContext] Firebase auth instance from '@/lib/firebase' is not available.");
+      toast({
+        variant: 'destructive',
+        title: "Authentication Service Error",
+        description: "The authentication service is currently unavailable. Please try again later.",
+        duration: 7000,
+      });
+      return;
+    }
+
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      // Successful sign-up will be handled by onAuthStateChanged
+      toast({
+        title: "Account Created",
+        description: "Your account has been created successfully!",
+        duration: 5000,
+      });
+    } catch (error: any) {
+      console.error("[AuthContext] Error during createUserWithEmailAndPassword: ", error.code, error.message);
+      
+      let errorMessage = "An unexpected error occurred while creating your account. Please try again.";
+      
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = "An account with this email already exists. Please sign in instead.";
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "Please enter a valid email address.";
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = "Password should be at least 6 characters long.";
       }
+      
+      toast({
+        variant: 'destructive',
+        title: "Sign-Up Failed",
+        description: errorMessage,
+        duration: 7000,
+      });
     }
   };
 
@@ -105,7 +134,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const value = {
     currentUser,
     loading,
-    signInWithGoogle,
+    signInWithEmail,
+    signUpWithEmail,
     signOutUser,
   };
 

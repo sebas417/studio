@@ -5,11 +5,10 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppLogo } from '@/components/AppLogo';
-import { Button } from '@/components/ui/button';
-import { LogIn } from 'lucide-react';
+import { LoginForm } from '@/components/LoginForm';
 
 // Helper for loading spinner
-const Loader2 = ({ className, ...props }: React.ComponentProps<typeof LogIn>) => (
+const Loader2 = ({ className, ...props }: { className?: string; [key: string]: any }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="24"
@@ -20,7 +19,7 @@ const Loader2 = ({ className, ...props }: React.ComponentProps<typeof LogIn>) =>
     strokeWidth="2"
     strokeLinecap="round"
     strokeLinejoin="round"
-    className={className} // Removed animate-spin here, apply it where used
+    className={className}
     {...props}
   >
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
@@ -29,7 +28,7 @@ const Loader2 = ({ className, ...props }: React.ComponentProps<typeof LogIn>) =>
 
 
 export default function RootPage() {
-  const { currentUser, loading, signInWithGoogle } = useAuth();
+  const { currentUser, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -50,18 +49,14 @@ export default function RootPage() {
 
   if (!currentUser) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6 text-center">
-        <AppLogo />
-        <h1 className="mt-8 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-          Welcome to HSA Shield
-        </h1>
-        <p className="mt-4 text-lg text-muted-foreground">
-          Track your HSA expenses with ease. Scan receipts, manage reimbursements, and stay organized.
-        </p>
-        <Button onClick={signInWithGoogle} size="lg" className="mt-8">
-          <LogIn className="mr-2 h-5 w-5" />
-          Sign in with Google to Get Started
-        </Button>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
+        <div className="mb-8 text-center">
+          <AppLogo />
+          <p className="mt-4 text-lg text-muted-foreground">
+            Track your HSA expenses with ease. Scan receipts, manage reimbursements, and stay organized.
+          </p>
+        </div>
+        <LoginForm />
       </div>
     );
   }
