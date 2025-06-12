@@ -35,12 +35,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from '@/components/ui/skeleton';
 
 function UserNav() {
-  const { currentUser, loading, signInWithGoogle, signOutUser } = useAuth();
+  const { currentUser, loading, signOutUser } = useAuth();
   const router = useRouter();
 
   const handleSignIn = () => {
-    console.log("[UserNav] Sign in button CLICKED. Calling signInWithGoogle..."); // New log
-    signInWithGoogle();
+    router.push('/');
   };
 
   if (loading) {
@@ -56,7 +55,7 @@ function UserNav() {
     return (
       <Button onClick={handleSignIn} variant="outline">
         <LogIn className="mr-2 h-4 w-4" />
-        Sign in with Google
+        Sign In
       </Button>
     );
   }

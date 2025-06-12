@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppLogo } from '@/components/AppLogo';
-import { Button } from '@/components/ui/button';
+import { AuthForm } from '@/components/AuthForm';
 import { LogIn } from 'lucide-react';
 
 // Helper for loading spinner
@@ -29,7 +29,7 @@ const Loader2 = ({ className, ...props }: React.ComponentProps<typeof LogIn>) =>
 
 
 export default function RootPage() {
-  const { currentUser, loading, signInWithGoogle } = useAuth();
+  const { currentUser, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -50,18 +50,19 @@ export default function RootPage() {
 
   if (!currentUser) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6 text-center">
-        <AppLogo />
-        <h1 className="mt-8 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-          Welcome to HSA Shield
-        </h1>
-        <p className="mt-4 text-lg text-muted-foreground">
-          Track your HSA expenses with ease. Scan receipts, manage reimbursements, and stay organized.
-        </p>
-        <Button onClick={signInWithGoogle} size="lg" className="mt-8">
-          <LogIn className="mr-2 h-5 w-5" />
-          Sign in with Google to Get Started
-        </Button>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-6">
+        <div className="w-full max-w-md space-y-6">
+          <div className="text-center">
+            <AppLogo />
+            <h1 className="mt-6 text-2xl font-bold tracking-tight text-foreground">
+              Welcome to HSA Shield
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Track your HSA expenses with ease. Scan receipts, manage reimbursements, and stay organized.
+            </p>
+          </div>
+          <AuthForm />
+        </div>
       </div>
     );
   }
